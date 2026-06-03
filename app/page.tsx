@@ -391,7 +391,7 @@ export default function Page() {
                 </span>
               )}
             </button>
-            <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-lg border border-slate-200">v2.0.0</span>
+            <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-lg border border-slate-200">v2.0.1</span>
           </div>
         </div>
       </header>
@@ -996,6 +996,17 @@ export default function Page() {
                   <li className="text-slate-400">※ 기록은 이 PC 브라우저에 저장. 브라우저 캐시 삭제 시 사라질 수 있습니다.</li>
                   <li className="text-slate-400">※ 기록에서 불러온 결과로 클립 추출 시 영상 파일을 다시 선택해야 합니다.</li>
                 </ul>
+              </div>
+
+              {/* API 요금 안내 */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-xs text-yellow-800 space-y-1.5">
+                <p className="font-semibold text-yellow-900 mb-1">⚠️ Google AI API 요금 안내</p>
+                <p>• Gemini API는 무료 한도(분당 요청 수) 내에서는 무료로 사용 가능합니다.</p>
+                <p>• 유료 플랜(Pay-as-you-go)으로 전환한 경우, 사용량에 따라 요금이 청구됩니다.</p>
+                <p>• <span className="font-medium">앱을 더 이상 사용하지 않을 경우</span> 아래에서 결제를 비활성화하세요:</p>
+                <p className="pl-2">— Google AI Studio › 설정 › 결제</p>
+                <p className="pl-2">— Google Cloud Console › 결제 › 예산 및 알림</p>
+                <p>• API 키 자체를 삭제하면 이후 모든 요청이 차단됩니다.</p>
               </div>
 
               {/* 바이럴 패턴 */}
