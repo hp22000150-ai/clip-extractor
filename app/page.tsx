@@ -391,7 +391,7 @@ export default function Page() {
                 </span>
               )}
             </button>
-            <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-lg border border-slate-200">v2.0.1</span>
+            <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-lg border border-slate-200">v2.0.2</span>
           </div>
         </div>
       </header>

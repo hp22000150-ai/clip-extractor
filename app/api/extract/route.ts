@@ -80,26 +80,36 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 클립 + 썸네일 병렬 추출
-    await Promise.all(clips.map(async (clip, i) => {
+    // 클립 경로 사전 초기화
+    clips.forEach((_, i) => {
+      clipPaths[i] = path.join(os.tmpdir(), `ce_clip_${ts}_${i + 1}.mp4`);
+      thumbPaths[i] = path.join(os.tmpdir(), `ce_thumb_${ts}_${i + 1}.jpg`);
+    });
+
+    const extractFn =
+      format === "vertical" ? extractClipVertical :
+      format === "square"   ? extractClipSquare :
+                              extractClip;
+
+    // 동시 실행 2개로 제한 (Windows 파일 동시 접근 충돌 방지)
+    const CONCURRENCY = 2;
+    const queue = clips.map((clip, i) => async () => {
       const startSec = Math.max(0, mmssToSecs(clip.start));
       const endSec = mmssToSecs(clip.end);
       const duration = Math.max(minDuration, endSec - startSec);
-      const outPath = path.join(os.tmpdir(), `ce_clip_${ts}_${i + 1}.mp4`);
-      const thumbPath = path.join(os.tmpdir(), `ce_thumb_${ts}_${i + 1}.jpg`);
-      clipPaths[i] = outPath;
-      thumbPaths[i] = thumbPath;
+      await extractFn(ffmpeg, tempInput, startSec, duration, clipPaths[i]);
+      await extractThumbnail(ffmpeg, tempInput, startSec + 2, thumbPaths[i]).catch(() => {});
+    });
 
-      const extractFn =
-        format === "vertical" ? extractClipVertical :
-        format === "square"   ? extractClipSquare :
-                                extractClip;
-
-      await Promise.all([
-        extractFn(ffmpeg, tempInput, startSec, duration, outPath),
-        extractThumbnail(ffmpeg, tempInput, startSec + 2, thumbPath),
-      ]);
-    }));
+    // worker 2개가 큐를 순서대로 소화
+    let qi = 0;
+    async function worker() {
+      while (qi < queue.length) {
+        const task = queue[qi++];
+        await task();
+      }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 
     const zipFiles: { name: string; data: Buffer }[] = [];
     for (let i = 0; i < clipPaths.length; i++) {
