@@ -7,6 +7,7 @@ interface Moment {
   start: string; end: string; type: string;
   title: string; highlight: string; reason: string;
   hook: string; hashtags: string[]; score?: number;
+  viralType?: string;
 }
 
 interface AnalysisResult {
@@ -22,11 +23,22 @@ const TYPE_COLORS: Record<string, string> = {
   "하이라이트": "text-green-600 bg-green-50 border-green-200",
 };
 
+const VIRAL_TYPE_COLORS: Record<string, string> = {
+  "공유형": "text-green-700 bg-green-50 border-green-200",
+  "댓글형": "text-blue-700 bg-blue-50 border-blue-200",
+  "재시청형": "text-purple-700 bg-purple-50 border-purple-200",
+  "저장형": "text-amber-700 bg-amber-50 border-amber-200",
+  "완주형": "text-orange-700 bg-orange-50 border-orange-200",
+};
+
 const AI_ROLE_PRESETS = [
   { label: "예능 PD", value: "너는 10년 경력의 예능 PD야. 웃음 포인트, 케미, 반전 상황을 귀신같이 잡아내고 시청자가 다시 보고 싶어지는 장면을 본능적으로 선별해." },
   { label: "드라마 편집자", value: "너는 감성 드라마 전문 편집자야. 감동 순간, 인물 간의 감정 교류, 눈물이 날 것 같은 대사를 정확하게 포착해. 시청자의 가슴을 울리는 장면 위주로 분석해." },
   { label: "MZ 쇼츠 전문가", value: "너는 MZ세대 쇼츠 전문 크리에이터야. 트렌디하고 바이럴될 장면을 잡아내. 첫 3초 훅, 댓글 유발 포인트, 공유하고 싶은 장면에 집중해." },
   { label: "스포츠 하이라이터", value: "너는 스포츠 하이라이트 전문 편집자야. 극적인 순간, 클라이맥스, 감동적인 역전 장면을 정확히 포착해. 시청자의 심장을 뛰게 하는 장면 위주로 분석해." },
+  { label: "YouTube Shorts", value: "너는 유튜브 쇼츠 알고리즘 전문가야. 완주율(Average View Duration)이 가장 중요해. 유튜브는 시청자가 끝까지 볼수록 추천에 유리해. 첫 3초에 시청자를 잡고, 중간에 이탈 없이 끝까지 보게 만드는 흐름의 장면을 골라. 좋아요를 누르게 만드는 강한 공감 포인트도 중요해." },
+  { label: "Instagram Reels", value: "너는 인스타그램 릴스 전문 크리에이터야. '저장'과 '공유'가 알고리즘 핵심 신호야. 시각적으로 임팩트 있고, 감성적이며, 친구에게 보내거나 스토리에 올리고 싶은 장면을 골라. 감동·웃음·놀라움 중 하나가 강하게 압축된 장면이 최고야." },
+  { label: "TikTok", value: "너는 틱톡 바이럴 전문가야. '공유'와 '댓글'이 알고리즘 핵심 신호야. 처음 1초가 전부야 — 스크롤을 멈추게 만들어야 해. 밈이 될 수 있는 장면, '이거 나만 공감하는 거 아니지?' 싶은 순간, '야 이거 봐봐' 하고 바로 보내고 싶은 장면을 찾아." },
   { label: "직접 입력", value: "" },
 ];
 
@@ -75,6 +87,13 @@ export default function Page() {
   const [clipCount, setClipCount] = useState(5);
   const [minClipDuration, setMinClipDuration] = useState(120);
   const [outputFormat, setOutputFormat] = useState<"original" | "vertical" | "square">("original");
+
+  // 레퍼런스 쇼츠
+  const [refUrl, setRefUrl] = useState("");
+  const [refLoading, setRefLoading] = useState(false);
+  const [refAudio, setRefAudio] = useState<string | null>(null);
+  const [refTitle, setRefTitle] = useState("");
+  const [refError, setRefError] = useState("");
   const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
 
   // 분석
@@ -189,6 +208,7 @@ export default function Page() {
       if (excludeRanges && excludeRanges.length > 0) {
         fd.append("excludeRanges", JSON.stringify(excludeRanges));
       }
+      if (refAudio) fd.append("referenceAudio", refAudio);
 
       const res = await fetch("/api/analyze", { method: "POST", body: fd, signal: controller.signal });
       const data = await res.json();
@@ -284,6 +304,26 @@ export default function Page() {
 
   const isValidTime = (t: string) => /^\d{1,2}:\d{2}(:\d{2})?$/.test(t.trim());
 
+  const handleLoadReference = async () => {
+    if (!refUrl.trim()) return;
+    setRefLoading(true); setRefError(""); setRefAudio(null); setRefTitle("");
+    try {
+      const res = await fetch("/api/reference", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: refUrl.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setRefAudio(data.audio);
+      setRefTitle(data.title || "참고 쇼츠");
+    } catch (e) {
+      setRefError(e instanceof Error ? e.message : "로드 실패");
+    } finally {
+      setRefLoading(false);
+    }
+  };
+
   const exportMetadata = () => {
     if (!result) return;
     const lines = [
@@ -351,7 +391,7 @@ export default function Page() {
                 </span>
               )}
             </button>
-            <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-lg border border-slate-200">v1.0.3</span>
+            <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-lg border border-slate-200">v2.0.0</span>
           </div>
         </div>
       </header>
@@ -457,6 +497,39 @@ export default function Page() {
               })}
             </div>
           </div>
+        </section>
+
+        {/* ── 레퍼런스 쇼츠 ── */}
+        <section className="card p-4 space-y-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">참고 쇼츠 <span className="text-xs font-normal text-slate-500">(선택) — 이런 느낌으로 찾아줘</span></p>
+            <p className="text-xs text-slate-500 mt-0.5">바이럴된 쇼츠 URL을 입력하면 AI가 해당 스타일·분위기를 참고해 분석합니다.</p>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="url"
+              value={refUrl}
+              onChange={e => { setRefUrl(e.target.value); setRefError(""); }}
+              onKeyDown={e => e.key === "Enter" && handleLoadReference()}
+              placeholder="https://youtube.com/shorts/..."
+              className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-400 transition-all"
+            />
+            <button
+              onClick={handleLoadReference}
+              disabled={refLoading || !refUrl.trim()}
+              className="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-800 text-white hover:bg-slate-700 disabled:opacity-40 transition-all shrink-0"
+            >
+              {refLoading ? <span className="flex items-center gap-1"><Spinner />로딩</span> : "불러오기"}
+            </button>
+          </div>
+          {refAudio && (
+            <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-3 py-2">
+              <span className="text-green-600 text-sm">✓</span>
+              <span className="text-xs text-green-700 font-medium truncate flex-1">{refTitle}</span>
+              <button onClick={() => { setRefAudio(null); setRefTitle(""); setRefUrl(""); }} className="text-xs text-green-600 hover:text-red-500 transition-colors shrink-0">✕ 제거</button>
+            </div>
+          )}
+          {refError && <p className="text-xs text-red-500 whitespace-pre-line">{refError}</p>}
         </section>
 
         {/* ── 추출 설정 ── */}
@@ -612,6 +685,11 @@ export default function Page() {
                     {m.score != null && (
                       <span className="text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
                         ⭐ {m.score}/10
+                      </span>
+                    )}
+                    {m.viralType && (
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${VIRAL_TYPE_COLORS[m.viralType] ?? "text-slate-600 bg-slate-50 border-slate-200"}`}>
+                        {m.viralType}
                       </span>
                     )}
                   </div>
@@ -920,11 +998,31 @@ export default function Page() {
                 </ul>
               </div>
 
+              {/* 바이럴 패턴 */}
+              <div>
+                <h3 className="font-bold text-slate-800 mb-2 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-slate-800 text-white text-xs font-bold flex items-center justify-center shrink-0">🔥</span>
+                  AI 바이럴 분석 기준
+                </h3>
+                <p className="text-xs text-slate-500 pl-8 mb-2">AI가 장면을 선정할 때 아래 8가지 패턴을 적용합니다. 각 장면은 2개 이상 해당해야 선정됩니다.</p>
+                <ul className="space-y-1 text-xs text-slate-600 pl-8">
+                  <li>① <span className="font-medium text-slate-700">스크롤 멈춤</span> — 피드에서 첫 0.5초 안에 손이 멈추는 자극</li>
+                  <li>② <span className="font-medium text-slate-700">완주 유도</span> — 끝까지 보게 만드는 긴장감·궁금증</li>
+                  <li>③ <span className="font-medium text-slate-700">재시청 충동</span> — 반전·임팩트로 다시 보고 싶어지는 클립</li>
+                  <li>④ <span className="font-medium text-slate-700">공유 충동</span> — "이거 봐봐" 하고 보내고 싶은 순간</li>
+                  <li>⑤ <span className="font-medium text-slate-700">댓글 폭발</span> — 공감·논쟁·감탄이 터지는 포인트</li>
+                  <li>⑥ <span className="font-medium text-slate-700">감정 압축</span> — 짧은 시간 안에 감정 변화가 극적으로 일어나는 구간</li>
+                  <li>⑦ <span className="font-medium text-slate-700">리액션 증폭</span> — 출연자 표정·반응이 시청자 감정을 배로 키우는 순간</li>
+                  <li>⑧ <span className="font-medium text-slate-700">저장 욕구</span> — 스크린샷·저장하고 싶은 명대사·명장면</li>
+                </ul>
+              </div>
+
               {/* 팁 */}
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-blue-700 space-y-1.5">
                 <p className="font-semibold text-blue-800 mb-1.5">💡 활용 팁</p>
                 <p>• 같은 영상을 AI 역할만 바꿔 여러 번 분석하면 다른 장면을 잡아냅니다</p>
                 <p>• 🔄 재분석을 누르면 이전 장면과 겹치지 않는 새 장면을 찾습니다</p>
+                <p>• score가 높을수록 바이럴 가능성이 높은 장면입니다 (8점 이상 우선 추출 권장)</p>
                 <p>• 포인트 자막은 추출 전에 생성해야 ZIP에 자동 포함됩니다</p>
                 <p>• 분석 완료 시 브라우저 알림이 옵니다 (알림 허용 필요)</p>
                 <p>• 분석 중 취소가 필요하면 진행률 표시 옆 [취소] 버튼을 누르세요</p>

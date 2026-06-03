@@ -36,6 +36,7 @@ interface FormFields {
   sceneHint: string; types: string[];
   clipCount: number; minDuration: number;
   excludeRanges: ExcludeRange[];
+  referenceAudio: string;
 }
 
 function parseFormData(req: NextRequest): Promise<FormFields> {
@@ -49,6 +50,7 @@ function parseFormData(req: NextRequest): Promise<FormFields> {
     let sceneHint = ""; let types: string[] = [];
     let clipCount = 5; let minDuration = 120;
     let excludeRanges: ExcludeRange[] = [];
+    let referenceAudio = "";
     let writeFinish: Promise<void> | null = null;
 
     bb.on("file", (_field, stream, info) => {
@@ -68,13 +70,14 @@ function parseFormData(req: NextRequest): Promise<FormFields> {
       if (name === "clipCount") { const n = parseInt(val); if (n >= 1 && n <= 15) clipCount = n; }
       if (name === "minDuration") { const d = parseInt(val); if (d >= 15) minDuration = d; }
       if (name === "excludeRanges") { try { excludeRanges = JSON.parse(val); } catch {} }
+      if (name === "referenceAudio") referenceAudio = val;
     });
 
     bb.on("finish", async () => {
       try {
         if (writeFinish) await writeFinish;
         if (!filePath) { reject(new Error("파일을 받지 못했습니다.")); return; }
-        resolve({ filePath, fileName, aiRole, persona, sceneHint, types, clipCount, minDuration, excludeRanges });
+        resolve({ filePath, fileName, aiRole, persona, sceneHint, types, clipCount, minDuration, excludeRanges, referenceAudio });
       } catch (e) { reject(e); }
     });
 
@@ -132,7 +135,7 @@ function buildPrompts(aiRole: string, persona: string, sceneHint: string, typeEn
     : "";
 
   const momentSlot = (n: number) =>
-    `{"start":"MM:SS","end":"MM:SS","type":"${typeEnum} 중 하나","title":"장면${n} 제목(한국어)","highlight":"시청자가 느낄 감정 위주 핵심 내용(한국어)","reason":"일반 시청자가 실제로 반응하는 이유(한국어)","hook":"첫 3초 훅 멘트(한국어, 질문형·충격형·공감형 중 효과적인 것)","hashtags":["#태그1","#태그2","#태그3","#태그4","#태그5"],"score":8}`;
+    `{"start":"MM:SS","end":"MM:SS","type":"${typeEnum} 중 하나","viralType":"공유형|댓글형|재시청형|저장형|완주형 중 가장 잘 맞는 것","title":"장면${n} 제목(한국어)","highlight":"시청자가 느낄 감정 위주 핵심 내용(한국어)","reason":"일반 시청자가 실제로 반응하는 이유(한국어)","hook":"첫 3초 훅 멘트(한국어, 질문형·충격형·공감형 중 효과적인 것)","hashtags":["#태그1","#태그2","#태그3","#태그4","#태그5"],"score":8}`;
 
   const momentSlotsStr = Array.from({ length: clipCount }, (_, i) => momentSlot(i + 1)).join(",\n    ");
   const durationGuide = DURATION_GUIDE[minDuration] ?? "최소 2분~최대 3분";
@@ -170,7 +173,14 @@ ${persona}의 반응이 폭발할 장면 ${clipCount}개를 아래 JSON으로 �
 - end는 이야기·감정이 자연스럽게 마무리되는 시점
 - type은 [${typeEnum}] 중 가장 잘 맞는 것
 - score(1~10): 쇼츠 바이럴 가능성. 10=즉시 공유하고 싶은 수준
-${typePreference ? `- ${typePreference}` : ""}`;
+${typePreference ? `- ${typePreference}` : ""}
+
+[바이럴 필터 — 선정한 각 장면이 아래 중 2개 이상 해당해야 함]
+- 스크롤 멈춤: 이 장면이 피드 첫 화면이라면 손이 멈추는가?
+- 완주 유도: 이 클립을 끝까지 보게 만드는 요소가 있는가?
+- 공유·저장: "이거 봐봐" 또는 "저장해야지" 충동이 생기는가?
+- 댓글 유발: 이 장면을 보고 댓글을 쓰고 싶어지는가?
+- 감정 강도: 감정이 짧고 강하게 압축되어 전달되는가?`;
 
   return { fullPrompt };
 }
@@ -185,7 +195,7 @@ export async function POST(req: NextRequest) {
   let geminiFileUri = "";
 
   try {
-    const { filePath, types, aiRole, persona, sceneHint, clipCount, minDuration, excludeRanges } = await parseFormData(req);
+    const { filePath, types, aiRole, persona, sceneHint, clipCount, minDuration, excludeRanges, referenceAudio } = await parseFormData(req);
     tempInput = filePath;
 
     const ffmpeg = resolveFfmpeg();
@@ -203,17 +213,38 @@ export async function POST(req: NextRequest) {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
       model: "gemini-2.5-flash",
-      systemInstruction: "당신은 10년 경력의 유튜브 쇼츠 전문 편집자입니다. 바이럴되는 장면의 패턴을 정확히 파악하고, 시청자의 감정을 자극하는 순간을 본능적으로 포착합니다. 오디오를 정확히 전사하고 내용을 완전히 이해한 뒤 장면을 선정합니다. 모든 분석 내용은 한국어로 작성하세요.",
+      systemInstruction: `당신은 유튜브 쇼츠 바이럴 전략가이자 10년 경력의 영상 편집자입니다.
+수천 개의 바이럴 쇼츠를 직접 분석하며 터지는 영상의 공통 패턴을 완전히 내재화했습니다.
+오디오를 정확히 전사하고 내용을 완전히 파악한 뒤 장면을 선정합니다.
+모든 분석 내용은 한국어로 작성하세요.
+
+[바이럴 쇼츠의 핵심 패턴 — 반드시 이 기준으로 판단]
+① 스크롤 멈춤: 피드 스크롤 중 손이 멈추는 첫 0.5~1초의 강한 자극 (충격·웃음·호기심·공감)
+② 완주 유도: 시작부터 끝까지 긴장감·궁금증을 유지해 이탈을 막는 구조
+③ 재시청 충동: 반전·임팩트·"혹시 놓쳤나"는 느낌이 다시 보게 만드는 클립
+④ 공유 충동: "이거 봐봐" 하고 지인에게 보내거나 SNS에 올리고 싶은 순간
+⑤ 댓글 폭발: 공감·논쟁·감탄 중 하나가 터지는 포인트 (의견이 나뉘거나 모두가 동의)
+⑥ 감정 압축: 짧은 시간 안에 감정 변화가 극적으로 일어나는 고밀도 구간
+⑦ 리액션 증폭: 출연자의 표정·반응이 시청자 감정을 배로 키우는 순간
+⑧ 저장 욕구: 스크린샷·저장해두고 싶은 명대사·명장면`,
       generationConfig: { temperature: 0.8, maxOutputTokens: 65536, responseMimeType: "application/json" },
     });
 
     const { fullPrompt } = buildPrompts(aiRole, persona, sceneHint, typeEnum, typePreference, clipCount, minDuration, excludeRanges);
+
+    const refPart = referenceAudio
+      ? [
+          { inlineData: { mimeType: "audio/mpeg" as const, data: referenceAudio } },
+          "[레퍼런스] 위 오디오는 참고 쇼츠입니다. 이 쇼츠의 스타일·분위기·바이럴 포인트를 파악한 뒤, 아래 분석 대상 영상에서 유사한 느낌의 장면을 찾아주세요.",
+        ]
+      : [];
 
     let result;
     if (audioSize <= INLINE_LIMIT) {
       console.log(`[analyze] inline mode (${(audioSize / 1024 / 1024).toFixed(1)}MB)`);
       const audioBase64 = fs.readFileSync(tempAudio).toString("base64");
       result = await withRetry(() => model.generateContent([
+        ...refPart,
         { inlineData: { mimeType: "audio/mpeg", data: audioBase64 } },
         fullPrompt,
       ]));
@@ -221,6 +252,7 @@ export async function POST(req: NextRequest) {
       console.log(`[analyze] Files API mode (${(audioSize / 1024 / 1024).toFixed(1)}MB)`);
       geminiFileUri = await withRetry(() => uploadToGeminiFiles(apiKey, tempAudio));
       result = await withRetry(() => model.generateContent([
+        ...refPart,
         { fileData: { mimeType: "audio/mpeg", fileUri: geminiFileUri } },
         fullPrompt,
       ]));

@@ -51,4 +51,22 @@ try {
   process.exit(1);
 }
 
+// yt-dlp.exe 다운로드 (없을 때만)
+const ytdlpDst = path.join(STANDALONE, "yt-dlp.exe");
+if (!fs.existsSync(ytdlpDst)) {
+  console.log("  ⬇ yt-dlp.exe 다운로드 중... (최초 1회)");
+  try {
+    const { execSync } = require("child_process");
+    execSync(
+      `curl -L "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -o "${ytdlpDst}"`,
+      { stdio: "inherit" }
+    );
+    console.log("  ✓ yt-dlp.exe 다운로드 완료");
+  } catch (e) {
+    console.warn("  ⚠ yt-dlp.exe 다운로드 실패 (레퍼런스 기능 사용 불가):", e.message);
+  }
+} else {
+  console.log("  ✓ yt-dlp.exe 이미 존재함 (skip)");
+}
+
 console.log("\n✅ 완료. electron-builder 를 실행해도 됩니다.\n");
