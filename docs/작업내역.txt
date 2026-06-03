@@ -1,0 +1,183 @@
+================================================================
+  Clip Extractor — 작업 내역
+  기간: 2026-06-03
+================================================================
+
+────────────────────────────────────────────────────────────────
+1. 성능 최적화
+────────────────────────────────────────────────────────────────
+
+[클립 병렬 추출]
+  - 이전: 클립을 순서대로 하나씩 추출 (5개 선택 시 5배 느림)
+  - 개선: Promise.all로 모든 클립 동시 추출
+  - 효과: 클립 5개 기준 ~5배 속도 향상
+  - 파일: app/api/extract/route.ts
+
+[ffmpeg 비동기 전환]
+  - 이전: spawnSync — ffmpeg 실행 중 Node.js 이벤트 루프 완전 차단
+  - 개선: spawn + Promise — 비동기 처리
+  - 효과: 서버가 ffmpeg 실행 중에도 다른 요청 처리 가능
+  - 파일: lib/ffmpeg.ts
+
+[CRC32 테이블 사전 계산]
+  - 이전: makeZip 호출마다 256번 루프 계산
+  - 개선: 모듈 로드 시 한 번만 계산 후 재사용
+  - 파일: lib/zip.ts
+
+[오디오 추출 누락 await 수정]
+  - 이전: extractAudio() 앞에 await 없음 → 추출 전에 AI 호출 시도
+  - 개선: await 추가로 정상 순서 보장
+  - 파일: app/api/analyze/route.ts
+
+
+────────────────────────────────────────────────────────────────
+2. 버그 수정
+────────────────────────────────────────────────────────────────
+
+[같은 파일 재선택 불가]
+  - 증상: 동일 영상 파일을 두 번 선택하면 onChange 이벤트가 안 터짐
+  - 수정: 파일 선택 후 e.target.value = "" 로 input 초기화
+  - 파일: app/page.tsx
+
+[진행률 88%에서 멈춤]
+  - 증상: 영상 분석이 3분 이상 걸리면 진행률이 88%에서 멈춤
+  - 원인: Infinity로 나누면 ratio = 0이 되어 진행이 안 됨
+  - 수정: stage.until === Infinity일 때 ratio = 1로 처리
+  - 파일: app/page.tsx
+
+[타이머 메모리 누수]
+  - 증상: 빠르게 여러 번 추출하거나 기록 불러오기 시 이전 타이머 겹침
+  - 수정: useRef로 타이머 추적 후 새 타이머 시작 전 기존 것 clear
+  - 파일: app/page.tsx (extractDoneTimer, historyToastTimer)
+
+[컴포넌트 언마운트 시 타이머 미정리]
+  - 증상: 페이지 이탈 시 setInterval/setTimeout이 계속 실행
+  - 수정: cleanup useEffect 추가
+  - 파일: app/page.tsx
+
+[subtitle-guide 응답 타입 unknown[]]
+  - 증상: 응답 타입이 unknown[]으로 타입 안전하지 않음
+  - 수정: SubtitleItem 인터페이스 정의 + 배열 여부 검증 추가
+  - 파일: app/api/subtitle-guide/route.ts
+
+[재분석 시 유효하지 않은 타임스탬프 전송]
+  - 증상: 빨간색(유효하지 않은) 타임스탬프도 그대로 API에 전송됨
+  - 수정: isValidTime 필터링 후 전달
+  - 파일: app/page.tsx
+
+[import 순서 오류]
+  - 증상: export const maxDuration이 import 사이에 끼어있어 코드 가독성 저하
+  - 수정: 모든 import → export 순서로 정리
+  - 파일: app/api/analyze/route.ts, app/api/extract/route.ts
+
+[lib/retry.ts 파일 누락]
+  - 증상: analyze API 호출 시 모듈 not found 에러
+  - 확인 결과: 실제로는 파일이 존재했음 (glob에서 누락된 것)
+
+[미리보기 기능 전체 제거]
+  - 증상: 미리보기가 제대로 동작하지 않음
+  - 결정: 관련 코드 전체 삭제 (videoObjectUrl, previewIdx, playerPos,
+           dragRef, videoRef, seekPreview, 미니 플레이어 등)
+
+
+────────────────────────────────────────────────────────────────
+3. 기능 추가
+────────────────────────────────────────────────────────────────
+
+[클립 개수 조절]
+  - 3 / 5 / 7 / 10개 선택 (기본값 5개)
+  - AI 프롬프트의 moments 개수 동적 반영
+  - 파일: app/page.tsx, app/api/analyze/route.ts
+
+[최소 클립 길이 조절]
+  - 30초 / 1분 / 2분 / 3분 선택 (기본값 2분)
+  - AI 프롬프트 가이드 + ffmpeg 추출 시 최소 시간 모두 반영
+  - 파일: app/page.tsx, app/api/analyze/route.ts, app/api/extract/route.ts
+
+[세로 변환 9:16]
+  - 가로(원본) / 세로 9:16 선택
+  - 블러 배경 위에 원본 영상 중앙 오버레이 방식 (Shorts 표준)
+  - ffmpeg filter_complex로 한 번에 처리
+  - 파일: lib/ffmpeg.ts (extractClipVertical), app/api/extract/route.ts
+
+[썸네일 자동 추출]
+  - 클립 추출 시 각 클립 시작+2초 지점에서 JPG 자동 추출
+  - 클립 추출과 병렬 실행 (추가 시간 거의 없음)
+  - ZIP에 01_클립제목_thumb.jpg 형태로 자동 포함
+  - 파일: lib/ffmpeg.ts (extractThumbnail), app/api/extract/route.ts
+
+[SRT 자막 파일 생성]
+  - 포인트 자막 가이드를 실제 SRT 포맷으로 변환
+  - [📥 SRT 저장] 버튼: 개별 SRT 파일 즉시 다운로드
+  - 클립 추출 시 ZIP에 .srt 파일 자동 포함
+  - 캡컷에서 직접 import 가능한 표준 SRT 포맷
+  - 파일: lib/srt.ts (신규), app/page.tsx, app/api/extract/route.ts
+
+[재분석 (다른 장면 찾기)]
+  - 분석 결과가 마음에 안 들 때 [🔄 재분석] 버튼 클릭
+  - 기존 결과의 타임스탬프를 excludeRanges로 API에 전달
+  - AI가 이전 장면과 겹치지 않는 새 장면만 탐색
+  - 로딩 중 "다른 장면 찾는 중..." 표시
+  - 파일: app/page.tsx, app/api/analyze/route.ts
+
+[분석 품질 개선]
+  - 시스템 프롬프트: "10년 경력 쇼츠 편집자" 역할 강화
+  - 분석 순서 지시: 전체 전사 → 흐름 파악 → 장면 선정 3단계 명시
+  - 중복 방지: "선정된 장면 시간대 겹치지 않아야 함" 추가
+  - start 정확도: "느슨하게 잡지 말 것" 명시
+  - score 필드: 1~10 바이럴 가능성 점수 (카드에 ⭐ N/10 배지 표시)
+  - temperature: 1.0 → 0.8 (더 안정적인 JSON 출력)
+  - 파일: app/api/analyze/route.ts
+
+[도움말 업데이트]
+  - 추출 설정 섹션 신규 추가 (클립 개수·길이·세로변환·재분석·썸네일)
+  - 권장 사용 순서 9단계로 업데이트
+  - SRT 저장 안내 추가
+  - ⭐ score 배지 설명 추가
+  - 재분석 팁 추가
+  - 섹션 번호 재정렬
+
+[버전 업데이트]
+  - v0.603.4 → v1.0.0
+
+
+────────────────────────────────────────────────────────────────
+4. Electron EXE 빌드 설정
+────────────────────────────────────────────────────────────────
+
+[추가된 파일]
+  - electron/main.js       Electron 메인 프로세스
+  - electron/preload.js    IPC 브릿지 (contextBridge)
+  - electron/setup.html    API 키 입력 화면 (첫 실행 시)
+  - scripts/prepare-electron.js  빌드 전처리 스크립트
+  - electron-builder.yml   Windows NSIS 인스톨러 설정
+
+[수정된 파일]
+  - next.config.ts         output: "standalone" 추가
+  - package.json           main, electron 의존성, 빌드 스크립트 추가
+
+[배포 방식]
+  - 빌드 명령: npm run electron:build
+  - 결과물: dist-electron/Clip Extractor Setup 1.0.0.exe (인스톨러)
+  - 결과물: dist-electron/win-unpacked/Clip Extractor.exe (포터블)
+  - 배포 시 Setup.exe 하나만 전달하면 됨
+  - 수신자는 Node.js 불필요, API 키만 직접 입력
+
+[첫 실행 흐름]
+  Setup.exe 설치 → 앱 실행 → API 키 입력 화면
+  → 키 저장 (AppData\Roaming\Clip Extractor\config.json)
+  → 로딩 → 메인 화면
+
+[API 키 재설정]
+  AppData\Roaming\Clip Extractor\config.json 삭제 후 재실행
+
+
+────────────────────────────────────────────────────────────────
+5. TypeScript 정합성
+────────────────────────────────────────────────────────────────
+
+  - npx tsc --noEmit: 오류 0개
+  - npm run build: 성공 (Next.js 프로덕션 빌드)
+
+
+================================================================

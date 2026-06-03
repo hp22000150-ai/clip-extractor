@@ -1,0 +1,44 @@
+appId: com.clipextractor.app
+productName: Clip Extractor
+copyright: Copyright © 2025
+
+# Electron 메인 파일만 ASAR에 포함
+files:
+  - electron/**/*
+  - "!node_modules/**/*"
+  - "!.next/**/*"
+  - "!app/**/*"
+  - "!lib/**/*"
+  - "!scripts/**/*"
+  - "!public/**/*"
+
+# Next.js standalone 빌드를 resources 디렉터리에 포함
+extraResources:
+  - from: .next/standalone
+    to: standalone
+
+directories:
+  output: dist-electron
+  buildResources: build-resources
+
+# Windows 설정
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # icon: build-resources/icon.ico  # 아이콘 파일이 있을 경우 주석 해제
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Clip Extractor
+  installerLanguages:
+    - ko_KR
+    - en_US
+
+# ASAR 사용 (메인 프로세스 코드만)
+asar: true

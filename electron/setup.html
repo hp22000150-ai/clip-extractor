@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline';" />
+  <title>Clip Extractor — 초기 설정</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f8fafc;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      -webkit-app-region: drag;
+      user-select: none;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 32px 28px 28px;
+      width: 100%;
+      max-width: 440px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.06);
+      -webkit-app-region: no-drag;
+    }
+    .logo { font-size: 28px; margin-bottom: 10px; }
+    h1 { font-size: 17px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+    .desc { font-size: 12px; color: #64748b; margin-bottom: 22px; line-height: 1.6; }
+    label { font-size: 12px; font-weight: 600; color: #374151; display: block; margin-bottom: 6px; }
+    .input-wrap { position: relative; }
+    input[type="password"], input[type="text"] {
+      width: 100%;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 10px 38px 10px 12px;
+      font-size: 13px;
+      font-family: "Courier New", monospace;
+      color: #0f172a;
+      outline: none;
+      transition: border-color .15s;
+      background: #f8fafc;
+    }
+    input:focus { border-color: #3b82f6; background: #fff; }
+    input.error { border-color: #ef4444; background: #fff7f7; }
+    .toggle-vis {
+      position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; cursor: pointer; color: #94a3b8;
+      font-size: 15px; padding: 2px 4px; line-height: 1;
+    }
+    .toggle-vis:hover { color: #64748b; }
+    .hint { font-size: 11px; color: #94a3b8; margin-top: 7px; line-height: 1.5; }
+    .hint a { color: #3b82f6; cursor: pointer; text-decoration: none; }
+    .hint a:hover { text-decoration: underline; }
+    .err-msg { font-size: 12px; color: #ef4444; margin-top: 7px; min-height: 16px; }
+    .actions { display: flex; gap: 8px; margin-top: 20px; }
+    .btn {
+      flex: 1; padding: 10px 0; border-radius: 10px;
+      font-size: 13px; font-weight: 600; cursor: pointer;
+      transition: background .15s, color .15s;
+    }
+    .btn-cancel {
+      border: 1.5px solid #e2e8f0; background: #fff; color: #64748b;
+    }
+    .btn-cancel:hover { background: #f1f5f9; }
+    .btn-start {
+      flex: 2; border: none; background: #0f172a; color: #fff;
+    }
+    .btn-start:hover { background: #1e293b; }
+    .btn-start:disabled { background: #94a3b8; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">🎬</div>
+    <h1>Clip Extractor</h1>
+    <p class="desc">Google AI (Gemini) API 키가 필요합니다.<br>키는 이 PC에만 저장되며 외부로 전송되지 않습니다.</p>
+
+    <label for="apiKey">API 키</label>
+    <div class="input-wrap">
+      <input type="password" id="apiKey" placeholder="AIzaSy..." autocomplete="off" spellcheck="false" />
+      <button class="toggle-vis" id="toggleVis" tabindex="-1" title="보기/숨기기">👁</button>
+    </div>
+    <p class="hint">
+      키가 없으신가요?&nbsp;
+      <a id="linkAI" href="#">Google AI Studio</a>에서 무료 발급 가능합니다.
+    </p>
+    <p class="err-msg" id="errMsg"></p>
+
+    <div class="actions">
+      <button class="btn btn-cancel" id="btnCancel">취소</button>
+      <button class="btn btn-start" id="btnStart">시작하기 →</button>
+    </div>
+  </div>
+
+  <script>
+    const input    = document.getElementById("apiKey");
+    const errMsg   = document.getElementById("errMsg");
+    const btnStart = document.getElementById("btnStart");
+    const btnCancel= document.getElementById("btnCancel");
+    const toggleVis= document.getElementById("toggleVis");
+
+    let visible = false;
+    toggleVis.addEventListener("click", () => {
+      visible = !visible;
+      input.type = visible ? "text" : "password";
+      toggleVis.textContent = visible ? "🙈" : "👁";
+    });
+
+    input.addEventListener("input", () => {
+      input.classList.remove("error");
+      errMsg.textContent = "";
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submit();
+    });
+
+    function submit() {
+      const key = input.value.trim();
+      if (!key) {
+        input.classList.add("error");
+        errMsg.textContent = "API 키를 입력해 주세요.";
+        input.focus();
+        return;
+      }
+      if (!key.startsWith("AIza")) {
+        input.classList.add("error");
+        errMsg.textContent = "올바른 API 키 형식이 아닙니다. (AIzaSy...로 시작)";
+        input.focus();
+        return;
+      }
+      btnStart.disabled = true;
+      btnStart.textContent = "저장 중...";
+      window.electronAPI.submitApiKey(key);
+    }
+
+    btnStart.addEventListener("click", submit);
+    btnCancel.addEventListener("click", () => window.electronAPI.cancelSetup());
+    document.getElementById("linkAI").addEventListener("click", (e) => {
+      e.preventDefault();
+      window.electronAPI.openExternal("https://aistudio.google.com/app/apikey");
+    });
+
+    // 포커스
+    window.addEventListener("DOMContentLoaded", () => input.focus());
+    input.focus();
+  </script>
+</body>
+</html>
