@@ -141,10 +141,31 @@ function createMainWindow() {
   });
   win.setMenu(null);
   win.loadURL(`http://127.0.0.1:${PORT}`);
+
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
   });
+
+  // 파일 다운로드 시 네이티브 저장 다이얼로그 표시
+  win.webContents.session.on("will-download", (event, item) => {
+    const { dialog } = require("electron");
+    const filename = item.getFilename();
+    const ext = path.extname(filename).slice(1) || "*";
+
+    const savePath = dialog.showSaveDialogSync(win, {
+      title: "클립 저장",
+      defaultPath: path.join(app.getPath("downloads"), filename),
+      filters: [{ name: ext.toUpperCase() + " 파일", extensions: [ext] }],
+    });
+
+    if (savePath) {
+      item.setSavePath(savePath);
+    } else {
+      item.cancel();
+    }
+  });
+
   win.on("closed", () => app.quit());
   return win;
 }
