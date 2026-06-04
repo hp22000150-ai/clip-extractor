@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, type GenerativeModel, type Part } from "@google/generative-ai";
 import { jsonrepair } from "jsonrepair";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import Busboy from "busboy";
 import { Readable } from "stream";
-import { resolveFfmpeg, extractAudio } from "@/lib/ffmpeg";
+import { resolveFfmpeg, extractAudio, getVideoDurationSec, transcodeForAnalysis } from "@/lib/ffmpeg";
 import { withRetry } from "@/lib/retry";
 
 export const maxDuration = 3600;
@@ -37,6 +37,7 @@ interface FormFields {
   clipCount: number; minDuration: number;
   excludeRanges: ExcludeRange[];
   referenceAudio: string;
+  analysisMode: "audio" | "video";
 }
 
 function parseFormData(req: NextRequest): Promise<FormFields> {
@@ -51,6 +52,7 @@ function parseFormData(req: NextRequest): Promise<FormFields> {
     let clipCount = 5; let minDuration = 120;
     let excludeRanges: ExcludeRange[] = [];
     let referenceAudio = "";
+    let analysisMode: "audio" | "video" = "audio";
     let writeFinish: Promise<void> | null = null;
 
     bb.on("file", (_field, stream, info) => {
@@ -71,13 +73,14 @@ function parseFormData(req: NextRequest): Promise<FormFields> {
       if (name === "minDuration") { const d = parseInt(val); if (d >= 15) minDuration = d; }
       if (name === "excludeRanges") { try { excludeRanges = JSON.parse(val); } catch {} }
       if (name === "referenceAudio") referenceAudio = val;
+      if (name === "analysisMode" && (val === "audio" || val === "video")) analysisMode = val;
     });
 
     bb.on("finish", async () => {
       try {
         if (writeFinish) await writeFinish;
         if (!filePath) { reject(new Error("파일을 받지 못했습니다.")); return; }
-        resolve({ filePath, fileName, aiRole, persona, sceneHint, types, clipCount, minDuration, excludeRanges, referenceAudio });
+        resolve({ filePath, fileName, aiRole, persona, sceneHint, types, clipCount, minDuration, excludeRanges, referenceAudio, analysisMode });
       } catch (e) { reject(e); }
     });
 
@@ -88,14 +91,14 @@ function parseFormData(req: NextRequest): Promise<FormFields> {
   });
 }
 
-async function uploadToGeminiFiles(apiKey: string, audioPath: string): Promise<string> {
-  const audioBuffer = fs.readFileSync(audioPath);
+async function uploadToGeminiFiles(apiKey: string, filePath: string, mimeType: string): Promise<string> {
+  const fileBuffer = fs.readFileSync(filePath);
   const boundary = `----FormBoundary${Date.now()}`;
   const metaPart = Buffer.from(
-    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{"file":{"mimeType":"audio/mpeg"}}\r\n--${boundary}\r\nContent-Type: audio/mpeg\r\n\r\n`
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{"file":{"mimeType":"${mimeType}"}}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`
   );
   const closePart = Buffer.from(`\r\n--${boundary}--`);
-  const body = Buffer.concat([metaPart, audioBuffer, closePart]);
+  const body = Buffer.concat([metaPart, fileBuffer, closePart]);
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=multipart&key=${apiKey}`,
@@ -110,6 +113,27 @@ async function uploadToGeminiFiles(apiKey: string, audioPath: string): Promise<s
   const uri = data.file?.uri;
   if (!uri) throw new Error("Files API URI를 받지 못했습니다.");
   return uri;
+}
+
+// 스트리밍으로 생성 — thinking 중 연결 끊김 방지
+async function generateStreamed(model: GenerativeModel, parts: Array<string | Part>): Promise<string> {
+  const stream = await model.generateContentStream(parts);
+  const response = await stream.response;
+  return response.text();
+}
+
+async function waitForGeminiFileActive(apiKey: string, fileUri: string): Promise<void> {
+  const name = fileUri.split("/files/")[1];
+  if (!name) return;
+  const deadline = Date.now() + 120000;
+  while (Date.now() < deadline) {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/files/${name}?key=${apiKey}`);
+    const data = await res.json() as { state?: string };
+    if (data.state === "ACTIVE") return;
+    if (data.state === "FAILED") throw new Error("Gemini Files API 처리 실패");
+    await new Promise(r => setTimeout(r, 3000));
+  }
+  throw new Error("Gemini Files API 처리 시간 초과 (2분)");
 }
 
 async function deleteGeminiFile(apiKey: string, uri: string): Promise<void> {
@@ -192,16 +216,15 @@ export async function POST(req: NextRequest) {
   const ts = Date.now();
   let tempInput = "";
   const tempAudio = path.join(os.tmpdir(), `ce_audio_${ts}.mp3`);
+  const tempVideo = path.join(os.tmpdir(), `ce_video_${ts}.mp4`);
   let geminiFileUri = "";
 
   try {
-    const { filePath, types, aiRole, persona, sceneHint, clipCount, minDuration, excludeRanges, referenceAudio } = await parseFormData(req);
+    const { filePath, types, aiRole, persona, sceneHint, clipCount, minDuration, excludeRanges, referenceAudio, analysisMode } = await parseFormData(req);
     tempInput = filePath;
 
     const ffmpeg = resolveFfmpeg();
-    await extractAudio(ffmpeg, tempInput, tempAudio);
 
-    const audioSize = fs.statSync(tempAudio).size;
     const TYPE_MAP: Record<string, string> = {
       "케미": "케미와 매력이 넘치는", "열정": "뜨겁고 자극적인",
     };
@@ -210,12 +233,8 @@ export async function POST(req: NextRequest) {
       ? `${types.map(t => TYPE_MAP[t] ?? t).join("·")} 장면 위주로 선정.`
       : "";
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      systemInstruction: `당신은 유튜브 쇼츠 바이럴 전략가이자 10년 경력의 영상 편집자입니다.
+    const systemBase = `당신은 유튜브 쇼츠 바이럴 전략가이자 10년 경력의 영상 편집자입니다.
 수천 개의 바이럴 쇼츠를 직접 분석하며 터지는 영상의 공통 패턴을 완전히 내재화했습니다.
-오디오를 정확히 전사하고 내용을 완전히 파악한 뒤 장면을 선정합니다.
 모든 분석 내용은 한국어로 작성하세요.
 
 [바이럴 쇼츠의 핵심 패턴 — 반드시 이 기준으로 판단]
@@ -226,7 +245,16 @@ export async function POST(req: NextRequest) {
 ⑤ 댓글 폭발: 공감·논쟁·감탄 중 하나가 터지는 포인트 (의견이 나뉘거나 모두가 동의)
 ⑥ 감정 압축: 짧은 시간 안에 감정 변화가 극적으로 일어나는 고밀도 구간
 ⑦ 리액션 증폭: 출연자의 표정·반응이 시청자 감정을 배로 키우는 순간
-⑧ 저장 욕구: 스크린샷·저장해두고 싶은 명대사·명장면`,
+⑧ 저장 욕구: 스크린샷·저장해두고 싶은 명대사·명장면`;
+
+    const systemInstruction = analysisMode === "video"
+      ? systemBase + `\n\n[영상+오디오 분석 모드] 오디오뿐 아니라 출연자 표정·몸짓·자막·장면전환 등 시각 정보도 함께 활용해 바이럴 포인트를 더 정확히 잡아내세요.`
+      : systemBase + `\n\n오디오를 정확히 전사하고 내용을 완전히 파악한 뒤 장면을 선정합니다.`;
+
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      systemInstruction,
       generationConfig: { temperature: 0.8, maxOutputTokens: 65536, responseMimeType: "application/json" },
     });
 
@@ -239,27 +267,50 @@ export async function POST(req: NextRequest) {
         ]
       : [];
 
-    let result;
-    if (audioSize <= INLINE_LIMIT) {
-      console.log(`[analyze] inline mode (${(audioSize / 1024 / 1024).toFixed(1)}MB)`);
-      const audioBase64 = fs.readFileSync(tempAudio).toString("base64");
-      result = await withRetry(() => model.generateContent([
+    let responseText: string;
+
+    if (analysisMode === "video") {
+      // ── 영상+오디오 분석 모드 ──────────────────────────────────────────
+      const durationSec = await getVideoDurationSec(ffmpeg, tempInput);
+      if (durationSec > 3600) {
+        throw new Error("영상+오디오 모드는 60분 이하 영상만 지원합니다.\n오디오 모드로 다시 분석해 주세요.");
+      }
+      console.log(`[analyze] video mode — duration ${Math.round(durationSec / 60)}min, transcoding...`);
+      await transcodeForAnalysis(ffmpeg, tempInput, tempVideo);
+      const videoSize = fs.statSync(tempVideo).size;
+      console.log(`[analyze] video transcoded (${(videoSize / 1024 / 1024).toFixed(1)}MB), uploading...`);
+      geminiFileUri = await withRetry(() => uploadToGeminiFiles(apiKey, tempVideo, "video/mp4"));
+      await waitForGeminiFileActive(apiKey, geminiFileUri);
+      responseText = await withRetry(() => generateStreamed(model, [
         ...refPart,
-        { inlineData: { mimeType: "audio/mpeg", data: audioBase64 } },
+        { fileData: { mimeType: "video/mp4", fileUri: geminiFileUri } },
         fullPrompt,
       ]));
     } else {
-      console.log(`[analyze] Files API mode (${(audioSize / 1024 / 1024).toFixed(1)}MB)`);
-      geminiFileUri = await withRetry(() => uploadToGeminiFiles(apiKey, tempAudio));
-      result = await withRetry(() => model.generateContent([
-        ...refPart,
-        { fileData: { mimeType: "audio/mpeg", fileUri: geminiFileUri } },
-        fullPrompt,
-      ]));
+      // ── 오디오 분석 모드 (기본) ───────────────────────────────────────
+      await extractAudio(ffmpeg, tempInput, tempAudio);
+      const audioSize = fs.statSync(tempAudio).size;
+      if (audioSize <= INLINE_LIMIT) {
+        console.log(`[analyze] audio inline (${(audioSize / 1024 / 1024).toFixed(1)}MB)`);
+        const audioBase64 = fs.readFileSync(tempAudio).toString("base64");
+        responseText = await withRetry(() => generateStreamed(model, [
+          ...refPart,
+          { inlineData: { mimeType: "audio/mpeg", data: audioBase64 } },
+          fullPrompt,
+        ]));
+      } else {
+        console.log(`[analyze] audio Files API (${(audioSize / 1024 / 1024).toFixed(1)}MB)`);
+        geminiFileUri = await withRetry(() => uploadToGeminiFiles(apiKey, tempAudio, "audio/mpeg"));
+        responseText = await withRetry(() => generateStreamed(model, [
+          ...refPart,
+          { fileData: { mimeType: "audio/mpeg", fileUri: geminiFileUri } },
+          fullPrompt,
+        ]));
+      }
     }
 
     try {
-      return NextResponse.json(JSON.parse(jsonrepair(result.response.text())));
+      return NextResponse.json(JSON.parse(jsonrepair(responseText)));
     } catch {
       throw new Error("AI 응답을 파싱하지 못했습니다. 다시 시도해 주세요.");
     }
@@ -271,6 +322,7 @@ export async function POST(req: NextRequest) {
   } finally {
     if (geminiFileUri) await deleteGeminiFile(apiKey!, geminiFileUri);
     try { if (tempInput && fs.existsSync(tempInput)) fs.unlinkSync(tempInput); } catch {}
-    try { if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio); } catch {};
+    try { if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio); } catch {}
+    try { if (fs.existsSync(tempVideo)) fs.unlinkSync(tempVideo); } catch {}
   }
 }

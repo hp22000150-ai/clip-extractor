@@ -115,6 +115,11 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < clipPaths.length; i++) {
       const safeTitle = clips[i].title.replace(/[\\/:*?"<>|]/g, "").trim().slice(0, 40);
       const prefix = String(i + 1).padStart(2, "0");
+      const clipSize = fs.existsSync(clipPaths[i]) ? fs.statSync(clipPaths[i]).size : 0;
+      if (clipSize === 0) {
+        console.warn(`[extract] clip ${i + 1} is empty, skipping`);
+        continue;
+      }
       zipFiles.push({ name: `${prefix}_${safeTitle}.mp4`, data: fs.readFileSync(clipPaths[i]) });
       if (fs.existsSync(thumbPaths[i])) {
         zipFiles.push({ name: `${prefix}_${safeTitle}_thumb.jpg`, data: fs.readFileSync(thumbPaths[i]) });

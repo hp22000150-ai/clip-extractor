@@ -42,6 +42,33 @@ function spawnAsync(ffmpeg: string, args: string[], timeoutMs?: number): Promise
   });
 }
 
+export function getVideoDurationSec(ffmpegPath: string, inputPath: string): Promise<number> {
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegPath, ["-i", inputPath], { stdio: ["ignore", "ignore", "pipe"] });
+    const chunks: Buffer[] = [];
+    proc.stderr?.on("data", (d: Buffer) => chunks.push(d));
+    proc.on("close", () => {
+      const out = Buffer.concat(chunks).toString("utf8");
+      const m = out.match(/Duration:\s*(\d+):(\d+):(\d+)/);
+      resolve(m ? parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3]) : 0);
+    });
+    proc.on("error", () => resolve(0));
+  });
+}
+
+// Gemini 영상 분석용: 1FPS·360p 저화질 변환 (분석 전송용, 원본 영상과 무관)
+export function transcodeForAnalysis(ffmpeg: string, inputPath: string, outputPath: string): Promise<void> {
+  return spawnAsync(ffmpeg, [
+    "-loglevel", "error",
+    "-i", inputPath,
+    "-vf", "fps=1,scale=360:-2",
+    "-c:v", "libx264", "-crf", "35", "-preset", "ultrafast",
+    "-c:a", "aac", "-ar", "22050", "-ac", "1", "-b:a", "32k",
+    "-movflags", "+faststart",
+    "-y", outputPath,
+  ], 600000);
+}
+
 export function extractAudio(ffmpeg: string, inputPath: string, outputPath: string): Promise<void> {
   return spawnAsync(ffmpeg, [
     "-loglevel", "error",
@@ -63,12 +90,14 @@ export function extractAudioSegment(ffmpeg: string, inputPath: string, startSec:
 }
 
 export function extractClip(ffmpeg: string, inputPath: string, startSec: number, durationSec: number, outputPath: string): Promise<void> {
+  // double-ss: 5초 앞에서 입력 시킹 → 출력 시킹으로 정확한 첫 프레임 보장
+  const preSec = Math.min(5, startSec);
   return spawnAsync(ffmpeg, [
     "-loglevel", "error",
-    "-ss", String(startSec),
+    "-ss", String(startSec - preSec),
     "-i", inputPath,
+    "-ss", String(preSec),
     "-t", String(durationSec),
-    "-avoid_negative_ts", "make_zero",
     "-c:v", "libx264", "-c:a", "aac",
     "-movflags", "+faststart",
     "-y", outputPath,
@@ -83,15 +112,16 @@ export function extractClipVertical(ffmpeg: string, inputPath: string, startSec:
     "[src2]scale=1080:1920:force_original_aspect_ratio=decrease[fg]",
     "[bg][fg]overlay=(W-w)/2:(H-h)/2[out]",
   ].join(";");
+  const preSec = Math.min(5, startSec);
   return spawnAsync(ffmpeg, [
     "-loglevel", "error",
-    "-ss", String(startSec),
+    "-ss", String(startSec - preSec),
     "-i", inputPath,
+    "-ss", String(preSec),
     "-t", String(durationSec),
     "-filter_complex", filter,
     "-map", "[out]",
     "-map", "0:a?",
-    "-avoid_negative_ts", "make_zero",
     "-c:v", "libx264", "-c:a", "aac",
     "-movflags", "+faststart",
     "-y", outputPath,
@@ -106,15 +136,16 @@ export function extractClipSquare(ffmpeg: string, inputPath: string, startSec: n
     "[src2]scale=1080:1080:force_original_aspect_ratio=decrease[fg]",
     "[bg][fg]overlay=(W-w)/2:(H-h)/2[out]",
   ].join(";");
+  const preSec = Math.min(5, startSec);
   return spawnAsync(ffmpeg, [
     "-loglevel", "error",
-    "-ss", String(startSec),
+    "-ss", String(startSec - preSec),
     "-i", inputPath,
+    "-ss", String(preSec),
     "-t", String(durationSec),
     "-filter_complex", filter,
     "-map", "[out]",
     "-map", "0:a?",
-    "-avoid_negative_ts", "make_zero",
     "-c:v", "libx264", "-c:a", "aac",
     "-movflags", "+faststart",
     "-y", outputPath,

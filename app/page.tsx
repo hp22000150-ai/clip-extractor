@@ -87,6 +87,7 @@ export default function Page() {
   const [clipCount, setClipCount] = useState(5);
   const [minClipDuration, setMinClipDuration] = useState(120);
   const [outputFormat, setOutputFormat] = useState<"original" | "vertical" | "square">("original");
+  const [analysisMode, setAnalysisMode] = useState<"audio" | "video">("audio");
 
   // 레퍼런스 쇼츠
   const [refUrl, setRefUrl] = useState("");
@@ -157,14 +158,27 @@ export default function Page() {
   }, []);
 
   const startProgress = (initialLabel?: string) => {
-    setProgress(3); setProgressLabel(initialLabel ?? "오디오 추출 중...");
-    const stages = [
-      { until: 15, pct: 20, label: "오디오 추출 중..." },
-      { until: 40, pct: 45, label: "AI 장면 분석 중..." },
-      { until: 90, pct: 70, label: "AI 장면 분석 중..." },
-      { until: 180, pct: 88, label: "AI 장면 분석 중..." },
-      { until: Infinity, pct: 92, label: "AI 장면 분석 중..." },
-    ];
+    const isVideo = analysisMode === "video";
+    setProgress(3); setProgressLabel(initialLabel ?? (isVideo ? "영상 압축 중..." : "오디오 추출 중..."));
+    const stages = isVideo
+      ? [
+          { until: 30,       pct: 20, label: "영상 압축 중..." },
+          { until: 90,       pct: 40, label: "영상 업로드 중..." },
+          { until: 150,      pct: 60, label: "AI 영상 분석 중..." },
+          { until: 240,      pct: 80, label: "AI 영상 분석 중..." },
+          { until: 420,      pct: 93, label: "AI 응답 대기 중... (정상 진행 중)" },
+          { until: 600,      pct: 97, label: "AI 응답 대기 중... (정상 진행 중)" },
+          { until: Infinity, pct: 99, label: "AI 응답 대기 중... (정상 진행 중)" },
+        ]
+      : [
+          { until: 15,       pct: 20, label: "오디오 추출 중..." },
+          { until: 40,       pct: 45, label: "AI 장면 분석 중..." },
+          { until: 90,       pct: 70, label: "AI 장면 분석 중..." },
+          { until: 180,      pct: 88, label: "AI 장면 분석 중..." },
+          { until: 300,      pct: 93, label: "AI 응답 대기 중... (정상 진행 중)" },
+          { until: 480,      pct: 97, label: "AI 응답 대기 중... (정상 진행 중)" },
+          { until: Infinity, pct: 99, label: "AI 응답 대기 중... (정상 진행 중)" },
+        ];
     const start = Date.now();
     progressTimer.current = setInterval(() => {
       const elapsed = (Date.now() - start) / 1000;
@@ -205,6 +219,7 @@ export default function Page() {
       fd.append("types", JSON.stringify(selectedTypes));
       fd.append("clipCount", String(clipCount));
       fd.append("minDuration", String(minClipDuration));
+      fd.append("analysisMode", analysisMode);
       if (excludeRanges && excludeRanges.length > 0) {
         fd.append("excludeRanges", JSON.stringify(excludeRanges));
       }
@@ -391,7 +406,7 @@ export default function Page() {
                 </span>
               )}
             </button>
-            <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-lg border border-slate-200">v2.0.2</span>
+            <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-lg border border-slate-200">v0.604.6</span>
           </div>
         </div>
       </header>
@@ -572,6 +587,24 @@ export default function Page() {
                   </button>
                 ))}
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs text-slate-500">분석 모드</p>
+              <div className="flex gap-1.5">
+                <button onClick={() => setAnalysisMode("audio")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${analysisMode === "audio" ? "btn-active" : "bg-white border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+                  🎵 오디오 (기본)
+                </button>
+                <button onClick={() => setAnalysisMode("video")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${analysisMode === "video" ? "btn-active" : "bg-white border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+                  🎬 영상+오디오
+                </button>
+              </div>
+              {analysisMode === "video" && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+                  ⚠️ 표정·자막 등 시각 정보까지 분석 · API 비용 약 3배 · 60분 이하만 지원
+                </p>
+              )}
             </div>
           </div>
         </section>
@@ -880,10 +913,10 @@ export default function Page() {
               <div className="bg-slate-50 rounded-xl p-4 text-xs text-slate-700 space-y-1.5">
                 <p className="font-semibold text-slate-800 mb-2">📌 권장 사용 순서</p>
                 <p>① AI 역할 설정 → ② 타겟 시청자 → ③ 영상 파일 선택</p>
-                <p>→ ④ (선택) 장면 묘사·유형 지정 → ⑤ 추출 설정 (개수·길이·포맷)</p>
-                <p>→ ⑥ AI 분석 시작 → 결과 확인 (마음에 안 들면 🔄 재분석)</p>
-                <p>→ ⑦ 타임스탬프 수정 → ⑧ ✍ 포인트 자막 생성</p>
-                <p>→ ⑨ ✂ 추출 (자막포함) → ZIP 다운로드</p>
+                <p>→ ④ (선택) 장면 묘사·유형 지정 → ⑤ (선택) 참고 쇼츠 URL 입력</p>
+                <p>→ ⑥ 추출 설정 (개수·길이·포맷·분석 모드) → ⑦ AI 분석 시작</p>
+                <p>→ ⑧ 결과 확인 (마음에 안 들면 🔄 재분석) → ⑨ 타임스탬프 수정</p>
+                <p>→ ⑩ ✍ 포인트 자막 생성 → ⑪ ✂ 추출 (자막포함) → ZIP 다운로드</p>
                 <p className="text-slate-400 pt-1">※ 포인트 자막은 추출 전에 생성해야 ZIP에 자동 포함됩니다.</p>
               </div>
 
@@ -910,8 +943,9 @@ export default function Page() {
                   n: "3", title: "영상 파일",
                   items: [
                     "MP4, MOV, AVI, MKV, TS, WebM 등 대부분의 포맷 지원, 용량 제한 없음",
-                    "2시간 예능도 분석 가능 — 오디오만 추출해 AI에 전달합니다 (영상 화질 무관)",
-                    "30분 영상 → 약 1~2분  /  2시간 영상 → 약 3~5분 소요",
+                    "기본(오디오 모드): 오디오만 추출해 AI에 전달 — 영상 화질 무관, 2시간도 분석 가능",
+                    "영상+오디오 모드 선택 시: 영상 자체를 AI에 전달 — 표정·자막 등 시각 정보까지 분석 (60분 이하)",
+                    "30분 영상 → 약 1~2분  /  2시간 영상(오디오 모드) → 약 3~5분 소요",
                     "새 영상 선택 시 이전 분석 결과가 초기화됩니다",
                   ]
                 },
@@ -931,12 +965,25 @@ export default function Page() {
                   ]
                 },
                 {
-                  n: "6", title: "추출 설정",
+                  n: "6", title: "참고 쇼츠 (선택)",
+                  items: [
+                    "바이럴된 YouTube Shorts URL을 입력하면 AI가 해당 스타일·분위기를 참고해 분석합니다",
+                    "예) 조회수 높은 예능 쇼츠를 넣으면 → 비슷한 템포·편집감의 장면을 우선 선정",
+                    "[불러오기] 클릭 → 오디오 분석 완료 후 초록색 체크로 표시됩니다",
+                    "5분 이하 YouTube / YouTube Shorts URL만 지원합니다",
+                    "참고 쇼츠는 AI 분석 시 보조 자료로만 활용되며, 실제 영상은 저장되지 않습니다",
+                    "✕ 제거 버튼으로 참고 쇼츠를 해제할 수 있습니다",
+                  ]
+                },
+                {
+                  n: "7", title: "추출 설정",
                   items: [
                     "클립 개수: 3 / 5 / 7 / 10개 선택 (분석 전 설정 · 기본값 5개)",
                     "최소 클립 길이: 30초 / 1분 / 2분 / 3분 — AI 프롬프트 가이드 + 추출 시 최소 시간 모두 반영",
-                    "출력 포맷: 가로(원본 비율) 또는 세로 9:16 (Shorts/Reels용 · 블러 배경 자동 적용)",
+                    "출력 포맷: 가로(원본 비율) / 1:1 정사각형 / 세로 9:16 (Shorts/Reels용 · 블러 배경 자동 적용)",
                     "썸네일: 추출 시 각 클립 시작 지점 JPG가 ZIP에 자동 포함",
+                    "🎵 오디오 모드(기본): 빠르고 안정적, 용량 제한 없음",
+                    "🎬 영상+오디오 모드: 표정·자막 등 시각 정보까지 분석, API 비용 약 3배, 60분 이하만 지원 · 클립 추출은 항상 원본 화질",
                     "🔄 재분석: 결과가 마음에 안 들면 클릭 → 이전 장면을 제외한 새 장면 탐색",
                   ]
                 },
@@ -955,7 +1002,7 @@ export default function Page() {
               {/* 분석 결과 */}
               <div>
                 <h3 className="font-bold text-slate-800 mb-2 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-slate-800 text-white text-xs font-bold flex items-center justify-center shrink-0">7</span>
+                  <span className="w-6 h-6 rounded-full bg-slate-800 text-white text-xs font-bold flex items-center justify-center shrink-0">8</span>
                   분석 결과 활용
                 </h3>
                 <ul className="space-y-2 text-xs text-slate-600 pl-8">
@@ -971,7 +1018,7 @@ export default function Page() {
               {/* 포인트 자막 */}
               <div>
                 <h3 className="font-bold text-slate-800 mb-2 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-slate-800 text-white text-xs font-bold flex items-center justify-center shrink-0">8</span>
+                  <span className="w-6 h-6 rounded-full bg-slate-800 text-white text-xs font-bold flex items-center justify-center shrink-0">9</span>
                   ✍ 포인트 자막 가이드
                 </h3>
                 <ul className="space-y-1.5 text-xs text-slate-600 pl-8">
@@ -986,7 +1033,7 @@ export default function Page() {
               {/* 기록·기타 */}
               <div>
                 <h3 className="font-bold text-slate-800 mb-2 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-slate-800 text-white text-xs font-bold flex items-center justify-center shrink-0">9</span>
+                  <span className="w-6 h-6 rounded-full bg-slate-800 text-white text-xs font-bold flex items-center justify-center shrink-0">10</span>
                   기타 기능
                 </h3>
                 <ul className="space-y-1.5 text-xs text-slate-600 pl-8">
@@ -1097,8 +1144,9 @@ export default function Page() {
         </div>
       )}
 
-      <footer className="border-t border-slate-100 py-6 text-center mt-8">
-        <p className="text-xs text-slate-400">Clip Extractor — 로컬 전용 도구</p>
+      <footer className="border-t border-slate-100 py-6 text-center mt-8 space-y-1">
+        <p className="text-xs text-slate-400">Clip Extractor v0.604.6 — 로컬 전용 도구</p>
+        <p className="text-xs text-slate-400">Created by CONTENT FACTORY</p>
       </footer>
 
       {/* 추출 성공 알림 */}
