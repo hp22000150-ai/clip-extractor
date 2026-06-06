@@ -83,6 +83,7 @@ export default function Page() {
   const [persona, setPersona] = useState("20대 직장인");
   const [customPersona, setCustomPersona] = useState("");
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [episodeInfo, setEpisodeInfo] = useState("");
   const [sceneHint, setSceneHint] = useState("");
   const [clipCount, setClipCount] = useState(5);
   const [minClipDuration, setMinClipDuration] = useState(120);
@@ -215,6 +216,7 @@ export default function Page() {
       fd.append("file", videoFile);
       fd.append("aiRole", aiRole);
       fd.append("persona", customPersona || persona);
+      fd.append("episodeInfo", episodeInfo);
       fd.append("sceneHint", sceneHint);
       fd.append("types", JSON.stringify(selectedTypes));
       fd.append("clipCount", String(clipCount));
@@ -406,7 +408,7 @@ export default function Page() {
                 </span>
               )}
             </button>
-            <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-lg border border-slate-200">v0.604.6</span>
+            <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-lg border border-slate-200">v0.606.21</span>
           </div>
         </div>
       </header>
@@ -493,10 +495,18 @@ export default function Page() {
         {/* ── 장면 묘사 + 유형 선택 ── */}
         <section className="card p-4 space-y-4">
           <div className="space-y-2">
+            <p className="text-sm font-semibold text-slate-800">프로그램·회차 정보 <span className="text-xs font-normal text-slate-500">(선택)</span></p>
+            <input type="text" value={episodeInfo} onChange={e => setEpisodeInfo(e.target.value)}
+              placeholder="예) 런닝맨 800화, 무한도전 나쁜친구들 특집, 선재 업고 튀어 12화"
+              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-400 transition-all" />
+            <p className="text-xs text-slate-400">입력 시 AI가 해당 방송의 맥락·출연진·인기 포인트를 이해하고 더 정확하게 분석합니다</p>
+          </div>
+          <div className="space-y-2">
             <p className="text-sm font-semibold text-slate-800">찾고 싶은 장면 묘사 <span className="text-xs font-normal text-slate-500">(선택)</span></p>
             <input type="text" value={sceneHint} onChange={e => setSceneHint(e.target.value)}
-              placeholder="예) 두 사람이 처음 만나는 장면, 클라이맥스에서 눈물 흘리는 장면..."
+              placeholder="예) 3화 라면 먹는 리액션 장면, 두 사람 첫 만남, 클라이맥스 눈물 장면..."
               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-400 transition-all" />
+            <p className="text-xs text-slate-400">회차·장면을 구체적으로 적을수록 AI가 정확하게 찾습니다. 복수 입력 시 쉼표로 구분</p>
           </div>
           <div className="space-y-2">
             <p className="text-sm font-semibold text-slate-800">추출할 장면 유형 <span className="text-xs font-normal text-slate-500">(복수 선택 · 미선택 시 전체 분석)</span></p>
@@ -913,8 +923,9 @@ export default function Page() {
               <div className="bg-slate-50 rounded-xl p-4 text-xs text-slate-700 space-y-1.5">
                 <p className="font-semibold text-slate-800 mb-2">📌 권장 사용 순서</p>
                 <p>① AI 역할 설정 → ② 타겟 시청자 → ③ 영상 파일 선택</p>
-                <p>→ ④ (선택) 장면 묘사·유형 지정 → ⑤ (선택) 참고 쇼츠 URL 입력</p>
-                <p>→ ⑥ 추출 설정 (개수·길이·포맷·분석 모드) → ⑦ AI 분석 시작</p>
+                <p>→ ④ (선택) 프로그램·회차 정보 입력 → ⑤ (선택) 찾고 싶은 장면 묘사</p>
+                <p>→ ⑥ (선택) 유형 지정 → ⑦ (선택) 참고 쇼츠 URL 입력</p>
+                <p>→ ⑧ 추출 설정 (개수·길이·포맷·분석 모드) → ⑨ AI 분석 시작</p>
                 <p>→ ⑧ 결과 확인 (마음에 안 들면 🔄 재분석) → ⑨ 타임스탬프 수정</p>
                 <p>→ ⑩ ✍ 포인트 자막 생성 → ⑪ ✂ 추출 (자막포함) → ZIP 다운로드</p>
                 <p className="text-slate-400 pt-1">※ 포인트 자막은 추출 전에 생성해야 ZIP에 자동 포함됩니다.</p>
@@ -950,22 +961,31 @@ export default function Page() {
                   ]
                 },
                 {
-                  n: "4", title: "찾고 싶은 장면 묘사 (선택)",
+                  n: "4", title: "프로그램·회차 정보 (선택)",
+                  items: [
+                    "분석할 영상이 어떤 방송·회차인지 입력하면 AI가 출연진·포맷·인기 포인트 맥락을 이해하고 더 정확하게 분석합니다",
+                    "예) '런닝맨 800화'  /  '무한도전 나쁜친구들 특집'  /  '선재 업고 튀어 12화'",
+                    "비워두면 AI가 오디오만으로 내용을 추론합니다",
+                  ]
+                },
+                {
+                  n: "5", title: "찾고 싶은 장면 묘사 (선택)",
                   items: [
                     "AI에게 특정 장면을 우선 찾도록 힌트를 줍니다",
-                    "예) '두 출연자가 처음 만나는 장면'  /  '음식 먹는 리액션이 터지는 순간'",
+                    "예) '3화 라면 먹는 리액션 장면'  /  '클라이맥스 눈물 장면'  /  '두 사람 첫 만남'",
+                    "회차·장면을 구체적으로 적을수록 정확도가 올라갑니다. 쉼표로 복수 입력 가능",
                     "비워두면 AI가 전체 영상에서 자체 판단으로 선정합니다",
                   ]
                 },
                 {
-                  n: "5", title: "추출할 장면 유형 (선택)",
+                  n: "6", title: "추출할 장면 유형 (선택)",
                   items: [
                     "미선택 시 전체 유형에서 자동 분석 · 복수 선택 가능",
                     "🥺 감동 · 😂 웃음 · 😱 반전 · 💬 명대사 · 🔥 하이라이트 · ✨ 케미 · ⚡ 열정 · 📚 정보",
                   ]
                 },
                 {
-                  n: "6", title: "참고 쇼츠 (선택)",
+                  n: "7", title: "참고 쇼츠 (선택)",
                   items: [
                     "바이럴된 YouTube Shorts URL을 입력하면 AI가 해당 스타일·분위기를 참고해 분석합니다",
                     "예) 조회수 높은 예능 쇼츠를 넣으면 → 비슷한 템포·편집감의 장면을 우선 선정",
@@ -976,7 +996,7 @@ export default function Page() {
                   ]
                 },
                 {
-                  n: "7", title: "추출 설정",
+                  n: "8", title: "추출 설정",
                   items: [
                     "클립 개수: 3 / 5 / 7 / 10개 선택 (분석 전 설정 · 기본값 5개)",
                     "최소 클립 길이: 30초 / 1분 / 2분 / 3분 — AI 프롬프트 가이드 + 추출 시 최소 시간 모두 반영",
@@ -1145,7 +1165,7 @@ export default function Page() {
       )}
 
       <footer className="border-t border-slate-100 py-6 text-center mt-8 space-y-1">
-        <p className="text-xs text-slate-400">Clip Extractor v0.604.6 — 로컬 전용 도구</p>
+        <p className="text-xs text-slate-400">Clip Extractor v0.606.21 — 로컬 전용 도구</p>
         <p className="text-xs text-slate-400">Created by CONTENT FACTORY</p>
       </footer>
 

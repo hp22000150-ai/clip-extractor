@@ -1,6 +1,6 @@
 {
   "name": "clip-extractor",
-  "version": "0.604.6",
+  "version": "0.606.21",
   "private": true,
   "main": "electron/main.js",
   "scripts": {

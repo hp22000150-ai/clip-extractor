@@ -33,7 +33,7 @@ interface ExcludeRange { start: string; end: string; }
 interface FormFields {
   filePath: string; fileName: string;
   aiRole: string; persona: string;
-  sceneHint: string; types: string[];
+  episodeInfo: string; sceneHint: string; types: string[];
   clipCount: number; minDuration: number;
   excludeRanges: ExcludeRange[];
   referenceAudio: string;
@@ -48,7 +48,7 @@ function parseFormData(req: NextRequest): Promise<FormFields> {
 
     let filePath = ""; let fileName = "";
     let aiRole = ""; let persona = "20대 직장인";
-    let sceneHint = ""; let types: string[] = [];
+    let episodeInfo = ""; let sceneHint = ""; let types: string[] = [];
     let clipCount = 5; let minDuration = 120;
     let excludeRanges: ExcludeRange[] = [];
     let referenceAudio = "";
@@ -67,6 +67,7 @@ function parseFormData(req: NextRequest): Promise<FormFields> {
     bb.on("field", (name, val) => {
       if (name === "aiRole") aiRole = val;
       if (name === "persona") persona = val;
+      if (name === "episodeInfo") episodeInfo = val;
       if (name === "sceneHint") sceneHint = val;
       if (name === "types") { try { types = JSON.parse(val); } catch {} }
       if (name === "clipCount") { const n = parseInt(val); if (n >= 1 && n <= 15) clipCount = n; }
@@ -80,7 +81,7 @@ function parseFormData(req: NextRequest): Promise<FormFields> {
       try {
         if (writeFinish) await writeFinish;
         if (!filePath) { reject(new Error("파일을 받지 못했습니다.")); return; }
-        resolve({ filePath, fileName, aiRole, persona, sceneHint, types, clipCount, minDuration, excludeRanges, referenceAudio, analysisMode });
+        resolve({ filePath, fileName, aiRole, persona, episodeInfo, sceneHint, types, clipCount, minDuration, excludeRanges, referenceAudio, analysisMode });
       } catch (e) { reject(e); }
     });
 
@@ -142,9 +143,13 @@ async function deleteGeminiFile(apiKey: string, uri: string): Promise<void> {
   await fetch(`https://generativelanguage.googleapis.com/v1beta/files/${name}?key=${apiKey}`, { method: "DELETE" }).catch(() => {});
 }
 
-function buildPrompts(aiRole: string, persona: string, sceneHint: string, typeEnum: string, typePreference: string, clipCount: number, minDuration: number, excludeRanges: ExcludeRange[] = []) {
+function buildPrompts(aiRole: string, persona: string, episodeInfo: string, sceneHint: string, typeEnum: string, typePreference: string, clipCount: number, minDuration: number, excludeRanges: ExcludeRange[] = []) {
   const roleInstruction = aiRole.trim()
     ? `[AI 역할]\n${aiRole.trim()}\n이 역할의 시각과 전문성으로 영상을 분석하세요.\n`
+    : "";
+
+  const episodeLine = episodeInfo.trim()
+    ? `[영상 정보] 이 영상은 "${episodeInfo.trim()}"입니다. 해당 방송의 출연진·포맷·인기 포인트 맥락을 이해하고 분석에 반영하세요.\n`
     : "";
 
   const emotionGuide = `[감정 유형 정의 — 시청자 반응 기준]
@@ -170,7 +175,7 @@ function buildPrompts(aiRole: string, persona: string, sceneHint: string, typeEn
 
   const fullPrompt = `[필수 규칙] 모든 텍스트는 한국어. moments는 반드시 ${clipCount}개.${excludeSection}
 
-${roleInstruction}[분석 순서]
+${roleInstruction}${episodeLine}[분석 순서]
 1. 오디오 전체를 처음부터 끝까지 완전히 듣고 전사한다
 2. 전체 내용·흐름·감정선을 파악한다
 3. 그 후 [${persona}]의 시각으로 최적의 장면 ${clipCount}개를 선정한다
@@ -220,7 +225,7 @@ export async function POST(req: NextRequest) {
   let geminiFileUri = "";
 
   try {
-    const { filePath, types, aiRole, persona, sceneHint, clipCount, minDuration, excludeRanges, referenceAudio, analysisMode } = await parseFormData(req);
+    const { filePath, types, aiRole, persona, episodeInfo, sceneHint, clipCount, minDuration, excludeRanges, referenceAudio, analysisMode } = await parseFormData(req);
     tempInput = filePath;
 
     const ffmpeg = resolveFfmpeg();
@@ -258,7 +263,7 @@ export async function POST(req: NextRequest) {
       generationConfig: { temperature: 0.8, maxOutputTokens: 65536, responseMimeType: "application/json" },
     });
 
-    const { fullPrompt } = buildPrompts(aiRole, persona, sceneHint, typeEnum, typePreference, clipCount, minDuration, excludeRanges);
+    const { fullPrompt } = buildPrompts(aiRole, persona, episodeInfo, sceneHint, typeEnum, typePreference, clipCount, minDuration, excludeRanges);
 
     const refPart = referenceAudio
       ? [
