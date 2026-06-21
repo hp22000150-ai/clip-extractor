@@ -123,10 +123,13 @@ async function generateStreamed(model: GenerativeModel, parts: Array<string | Pa
   return response.text();
 }
 
-async function waitForGeminiFileActive(apiKey: string, fileUri: string): Promise<void> {
+// fileSizeMb 기준: 100MB당 2분, 최소 3분, 최대 15분
+async function waitForGeminiFileActive(apiKey: string, fileUri: string, fileSizeMb = 50): Promise<void> {
   const name = fileUri.split("/files/")[1];
   if (!name) return;
-  const deadline = Date.now() + 120000;
+  const timeoutMs = Math.min(900000, Math.max(180000, Math.ceil(fileSizeMb / 100) * 120000));
+  const deadline = Date.now() + timeoutMs;
+  const minutes = Math.round(timeoutMs / 60000);
   while (Date.now() < deadline) {
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/files/${name}?key=${apiKey}`);
     const data = await res.json() as { state?: string };
@@ -134,7 +137,7 @@ async function waitForGeminiFileActive(apiKey: string, fileUri: string): Promise
     if (data.state === "FAILED") throw new Error("Gemini Files API 처리 실패");
     await new Promise(r => setTimeout(r, 3000));
   }
-  throw new Error("Gemini Files API 처리 시간 초과 (2분)");
+  throw new Error(`Gemini Files API 처리 시간 초과 (${minutes}분)`);
 }
 
 async function deleteGeminiFile(apiKey: string, uri: string): Promise<void> {
@@ -283,9 +286,10 @@ export async function POST(req: NextRequest) {
       console.log(`[analyze] video mode — duration ${Math.round(durationSec / 60)}min, transcoding...`);
       await transcodeForAnalysis(ffmpeg, tempInput, tempVideo);
       const videoSize = fs.statSync(tempVideo).size;
-      console.log(`[analyze] video transcoded (${(videoSize / 1024 / 1024).toFixed(1)}MB), uploading...`);
+      const videoSizeMb = videoSize / 1024 / 1024;
+      console.log(`[analyze] video transcoded (${videoSizeMb.toFixed(1)}MB), uploading...`);
       geminiFileUri = await withRetry(() => uploadToGeminiFiles(apiKey, tempVideo, "video/mp4"));
-      await waitForGeminiFileActive(apiKey, geminiFileUri);
+      await waitForGeminiFileActive(apiKey, geminiFileUri, videoSizeMb);
       responseText = await withRetry(() => generateStreamed(model, [
         ...refPart,
         { fileData: { mimeType: "video/mp4", fileUri: geminiFileUri } },
@@ -304,8 +308,10 @@ export async function POST(req: NextRequest) {
           fullPrompt,
         ]));
       } else {
-        console.log(`[analyze] audio Files API (${(audioSize / 1024 / 1024).toFixed(1)}MB)`);
+        const audioSizeMb = audioSize / 1024 / 1024;
+        console.log(`[analyze] audio Files API (${audioSizeMb.toFixed(1)}MB)`);
         geminiFileUri = await withRetry(() => uploadToGeminiFiles(apiKey, tempAudio, "audio/mpeg"));
+        await waitForGeminiFileActive(apiKey, geminiFileUri, audioSizeMb);
         responseText = await withRetry(() => generateStreamed(model, [
           ...refPart,
           { fileData: { mimeType: "audio/mpeg", fileUri: geminiFileUri } },
@@ -317,6 +323,7 @@ export async function POST(req: NextRequest) {
     try {
       return NextResponse.json(JSON.parse(jsonrepair(responseText)));
     } catch {
+      console.error("[analyze] JSON 파싱 실패. 응답 앞 500자:", responseText.slice(0, 500));
       throw new Error("AI 응답을 파싱하지 못했습니다. 다시 시도해 주세요.");
     }
 

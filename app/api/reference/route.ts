@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
       ...extractorArgs,
       ...ffmpegArgs,
       url,
-    ], { ...spawnOpts, timeout: 20000 });
+    ], { ...spawnOpts, timeout: 30000 });
     let title = "참고 쇼츠";
     if (metaResult.status === 0 && metaResult.stdout) {
       try {
@@ -89,17 +89,17 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
-    // 오디오 다운로드 (32k MP3, 최대 5분)
+    // 오디오 다운로드 (64k MP3, 최대 5분) — 64K: AI 분석 품질 향상
     const dlResult = spawnSync(ytdlp, [
       url,
       "-x", "--audio-format", "mp3",
-      "--audio-quality", "32K",
+      "--audio-quality", "64K",
       "--match-filter", "duration <= 300",
       "--no-playlist",
       ...extractorArgs,
       ...ffmpegArgs,
       "-o", outTemplate,
-    ], { ...spawnOpts, timeout: 60000 });
+    ], { ...spawnOpts, timeout: 120000 });
 
     if (dlResult.status !== 0 || !fs.existsSync(outPath)) {
       const msg = (dlResult.stderr as Buffer | null)?.toString("utf-8") ?? "";

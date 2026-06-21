@@ -130,9 +130,9 @@ async function createLoadingWindow() {
 
 function createMainWindow() {
   const win = new BrowserWindow({
-    width: 1020,
+    width: 1224,
     height: 840,
-    minWidth: 680,
+    minWidth: 816,
     minHeight: 600,
     center: true,
     title: "Clip Extractor",

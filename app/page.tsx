@@ -136,6 +136,18 @@ export default function Page() {
   // 수동 클립
   const [manualClips, setManualClips] = useState<{ start: string; end: string; title: string }[]>([]);
 
+  // 탭
+  const [activeTab, setActiveTab] = useState<"clip" | "subtitle">("clip");
+
+  // 자막 생성
+  const [subVideoFile, setSubVideoFile] = useState<File | null>(null);
+  const [subDensity, setSubDensity] = useState<"촘촘" | "보통" | "띄엄">("보통");
+  const [subMoods, setSubMoods] = useState<string[]>([]);
+  const [subLoading, setSubLoading] = useState(false);
+  const [subError, setSubError] = useState("");
+  const [subResult, setSubResult] = useState<{ subtitle: string; pointSubtitle: string } | null>(null);
+  const subFileRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     try {
       const stored = JSON.parse(localStorage.getItem("ce_history") ?? "[]");
@@ -374,11 +386,41 @@ export default function Page() {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   };
 
+  const downloadSrtFile = (content: string, filename: string) => {
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
+  const handleGenerateSubtitle = async () => {
+    if (!subVideoFile || subLoading) return;
+    setSubLoading(true);
+    setSubError("");
+    setSubResult(null);
+    try {
+      const fd = new FormData();
+      fd.append("video", subVideoFile);
+      fd.append("density", subDensity);
+      if (subMoods.length > 0) fd.append("moods", JSON.stringify(subMoods));
+      const res = await fetch("/api/subtitle-generate", { method: "POST", body: fd });
+      const data = await res.json() as { subtitle?: string; pointSubtitle?: string; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? "자막 생성 실패");
+      setSubResult({ subtitle: data.subtitle ?? "", pointSubtitle: data.pointSubtitle ?? "" });
+    } catch (e) {
+      setSubError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubLoading(false);
+    }
+  };
+
   return (
     <main className="min-h-screen">
       {/* Header */}
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur-sm border-b border-slate-200">
-        <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-[806px] mx-auto px-4 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold text-slate-900">Clip Extractor</h1>
             <p className="text-xs text-slate-500 mt-0.5">긴 영상 → AI 하이라이트 추출 → 쇼츠 클립</p>
@@ -408,12 +450,22 @@ export default function Page() {
                 </span>
               )}
             </button>
-            <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-lg border border-slate-200">v0.606.21</span>
+            <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-lg border border-slate-200">v260621.0937</span>
           </div>
+        </div>
+        <div className="max-w-[806px] mx-auto px-4 flex gap-0 border-t border-slate-100">
+          <button onClick={() => setActiveTab("clip")}
+            className={`px-5 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${activeTab === "clip" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
+            클립 추출
+          </button>
+          <button onClick={() => setActiveTab("subtitle")}
+            className={`px-5 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${activeTab === "subtitle" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
+            자막 생성
+          </button>
         </div>
       </header>
 
-      <div className="max-w-2xl mx-auto px-4 py-8 space-y-5">
+      <div className={`max-w-[806px] mx-auto px-4 py-8 space-y-5 ${activeTab !== "clip" ? "hidden" : ""}`}>
 
         {/* ── AI 역할 설정 ── */}
         <section className="card p-4 space-y-3">
@@ -909,6 +961,130 @@ export default function Page() {
         )}
       </div>
 
+      {/* ── 자막 생성 탭 ── */}
+      {activeTab === "subtitle" && (
+        <div className="max-w-[806px] mx-auto px-4 py-8 space-y-5">
+
+          {/* 안내 */}
+          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-xs text-blue-800 space-y-1">
+            <p className="font-semibold text-blue-900 mb-1">자막 생성 안내</p>
+            <p>• 대사 없이 BGM만 있는 영상을 업로드하면 AI가 시각 장면을 분석해 창작 자막을 만듭니다</p>
+            <p>• <span className="font-medium text-red-600">자막.srt</span> — 일반 자막 (캡컷 › 텍스트 › 자막 파일 가져오기)</p>
+            <p>• <span className="font-medium" style={{ color: "#FFD700", WebkitTextStroke: "0.3px #b8860b" }}>포인트자막.srt</span> — 단어 강조(빨간) + 핵심 문장(금색) 포함</p>
+          </div>
+
+          {/* 영상 파일 */}
+          <section className="card p-4 space-y-3">
+            <p className="text-sm font-semibold text-slate-800">영상 파일</p>
+            <div className="flex items-center gap-3">
+              <button onClick={() => subFileRef.current?.click()}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-white text-xs font-medium hover:bg-slate-700 transition-colors shrink-0">
+                파일 선택
+              </button>
+              {subVideoFile
+                ? <span className="text-xs text-slate-700 truncate">{subVideoFile.name}</span>
+                : <span className="text-xs text-slate-400">MP4, MOV, AVI 등 영상 파일</span>}
+              <input ref={subFileRef} type="file" accept="video/*" className="hidden"
+                onChange={e => {
+                  const f = e.target.files?.[0];
+                  if (f) { setSubVideoFile(f); setSubResult(null); setSubError(""); }
+                  e.target.value = "";
+                }} />
+            </div>
+          </section>
+
+          {/* 자막 밀도 */}
+          <section className="card p-4 space-y-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-800">자막 밀도</p>
+              <p className="text-xs text-slate-500 mt-0.5">얼마나 자주 자막을 넣을지 설정합니다</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {([
+                { val: "촘촘", label: "촘촘하게", desc: "1~2초마다, 전체 커버" },
+                { val: "보통", label: "보통", desc: "3~4초 간격, 균형" },
+                { val: "띄엄", label: "핵심만", desc: "임팩트 순간만" },
+              ] as const).map(({ val, label, desc }) => (
+                <button key={val} onClick={() => setSubDensity(val)}
+                  className={`px-4 py-2 rounded-xl text-xs font-medium border transition-all text-left ${subDensity === val ? "btn-active" : "bg-white border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+                  <span className="block">{label}</span>
+                  <span className="block text-[10px] opacity-60 font-normal">{desc}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* 자막 분위기 */}
+          <section className="card p-4 space-y-3">
+            <p className="text-sm font-semibold text-slate-800">자막 분위기 <span className="text-xs font-normal text-slate-400">선택 — 복수 가능</span></p>
+            <div className="flex flex-wrap gap-2">
+              {["감성적", "유머러스", "긴장감", "따뜻한", "강렬한", "차분한", "신나는", "슬픈"].map(m => (
+                <button key={m} onClick={() => setSubMoods(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m])}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${subMoods.includes(m) ? "btn-active" : "bg-white border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+                  {m}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* 생성 버튼 */}
+          <button onClick={handleGenerateSubtitle} disabled={!subVideoFile || subLoading}
+            className="w-full py-3.5 rounded-2xl bg-slate-800 text-white font-semibold text-sm hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2">
+            {subLoading ? <><Spinner /> AI 자막 생성 중... (30초~3분 소요)</> : "자막 생성하기"}
+          </button>
+
+          {/* 에러 */}
+          {subError && (
+            <div className="rounded-2xl bg-red-50 border border-red-200 p-4 text-sm text-red-700 whitespace-pre-wrap">{subError}</div>
+          )}
+
+          {/* 결과 */}
+          {subResult && (
+            <section className="card p-4 space-y-4">
+              <p className="text-sm font-semibold text-slate-800">생성 완료</p>
+
+              {/* 자막.srt */}
+              <div className="border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">자막.srt <span className="text-xs font-normal text-slate-500">— 일반 자막</span></p>
+                    <p className="text-xs text-slate-400 mt-0.5">캡컷 › 텍스트 › 자막 파일 가져오기</p>
+                  </div>
+                  <button onClick={() => downloadSrtFile(subResult.subtitle, "자막.srt")}
+                    className="shrink-0 px-3 py-1.5 rounded-lg bg-slate-800 text-white text-xs font-medium hover:bg-slate-700 transition-colors">
+                    다운로드
+                  </button>
+                </div>
+                <pre className="text-xs text-slate-600 bg-slate-50 border border-slate-100 p-3 rounded-lg max-h-36 overflow-auto whitespace-pre-wrap font-mono leading-relaxed">
+                  {subResult.subtitle.slice(0, 600)}{subResult.subtitle.length > 600 ? "\n..." : ""}
+                </pre>
+              </div>
+
+              {/* 포인트자막.srt */}
+              <div className="border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">포인트자막.srt <span className="text-xs font-normal text-slate-500">— 강조 자막</span></p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      <span className="text-red-500 font-medium">빨간색</span> = 단어 강조 &nbsp;·&nbsp; <span className="font-medium" style={{ color: "#b8860b" }}>금색</span> = 핵심 문장
+                    </p>
+                  </div>
+                  <button onClick={() => downloadSrtFile(subResult.pointSubtitle, "포인트자막.srt")}
+                    className="shrink-0 px-3 py-1.5 rounded-lg bg-slate-800 text-white text-xs font-medium hover:bg-slate-700 transition-colors">
+                    다운로드
+                  </button>
+                </div>
+                <pre className="text-xs text-slate-600 bg-slate-50 border border-slate-100 p-3 rounded-lg max-h-36 overflow-auto whitespace-pre-wrap font-mono leading-relaxed">
+                  {subResult.pointSubtitle.slice(0, 600)}{subResult.pointSubtitle.length > 600 ? "\n..." : ""}
+                </pre>
+              </div>
+
+              <p className="text-xs text-slate-400 text-center">캡컷에서 가져온 후 포인트자막은 폰트·크기·위치를 직접 조정하세요</p>
+            </section>
+          )}
+        </div>
+      )}
+
       {/* 도움말 모달 */}
       {showHelp && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4" onClick={() => setShowHelp(false)}>
@@ -921,14 +1097,22 @@ export default function Page() {
 
               {/* 기본 흐름 */}
               <div className="bg-slate-50 rounded-xl p-4 text-xs text-slate-700 space-y-1.5">
-                <p className="font-semibold text-slate-800 mb-2">📌 권장 사용 순서</p>
+                <p className="font-semibold text-slate-800 mb-2">📌 [클립 추출 탭] 권장 사용 순서</p>
                 <p>① AI 역할 설정 → ② 타겟 시청자 → ③ 영상 파일 선택</p>
                 <p>→ ④ (선택) 프로그램·회차 정보 입력 → ⑤ (선택) 찾고 싶은 장면 묘사</p>
                 <p>→ ⑥ (선택) 유형 지정 → ⑦ (선택) 참고 쇼츠 URL 입력</p>
                 <p>→ ⑧ 추출 설정 (개수·길이·포맷·분석 모드) → ⑨ AI 분석 시작</p>
-                <p>→ ⑧ 결과 확인 (마음에 안 들면 🔄 재분석) → ⑨ 타임스탬프 수정</p>
-                <p>→ ⑩ ✍ 포인트 자막 생성 → ⑪ ✂ 추출 (자막포함) → ZIP 다운로드</p>
+                <p>→ ⑩ 결과 확인 (마음에 안 들면 🔄 재분석) → ⑪ 타임스탬프 수정</p>
+                <p>→ ⑫ ✍ 포인트 자막 생성 → ⑬ ✂ 추출 (자막포함) → ZIP 다운로드</p>
                 <p className="text-slate-400 pt-1">※ 포인트 자막은 추출 전에 생성해야 ZIP에 자동 포함됩니다.</p>
+              </div>
+
+              <div className="bg-blue-50 rounded-xl p-4 text-xs text-blue-800 space-y-1.5">
+                <p className="font-semibold text-blue-900 mb-2">📌 [자막 생성 탭] 사용 순서</p>
+                <p>① 헤더 [자막 생성] 탭 클릭 → ② 영상 파일 선택 (BGM만 있는 영상)</p>
+                <p>→ ③ 자막 밀도 선택 → ④ (선택) 분위기 선택 → ⑤ [자막 생성하기] 클릭</p>
+                <p>→ ⑥ 자막.srt 다운로드 + 포인트자막.srt 다운로드 → 캡컷 import</p>
+                <p className="text-blue-600 pt-1">※ 클립 추출 탭과 완전히 별개 기능 — 어떤 영상이든 자막만 만들 때 사용</p>
               </div>
 
               {[
@@ -954,9 +1138,10 @@ export default function Page() {
                   n: "3", title: "영상 파일",
                   items: [
                     "MP4, MOV, AVI, MKV, TS, WebM 등 대부분의 포맷 지원, 용량 제한 없음",
-                    "기본(오디오 모드): 오디오만 추출해 AI에 전달 — 영상 화질 무관, 2시간도 분석 가능",
+                    "기본(오디오 모드): 오디오만 추출해 AI에 전달 — 영상 화질 무관, 2시간 이상도 안정적으로 분석 가능",
                     "영상+오디오 모드 선택 시: 영상 자체를 AI에 전달 — 표정·자막 등 시각 정보까지 분석 (60분 이하)",
-                    "30분 영상 → 약 1~2분  /  2시간 영상(오디오 모드) → 약 3~5분 소요",
+                    "30분 영상 → 약 1~2분  /  1~2시간 영상 → 약 3~8분 소요 (오디오 모드 기준)",
+                    "'AI 응답 대기 중... (정상 진행 중)' 메시지는 AI가 긴 영상을 처리 중인 정상 상태입니다",
                     "새 영상 선택 시 이전 분석 결과가 초기화됩니다",
                   ]
                 },
@@ -989,7 +1174,7 @@ export default function Page() {
                   items: [
                     "바이럴된 YouTube Shorts URL을 입력하면 AI가 해당 스타일·분위기를 참고해 분석합니다",
                     "예) 조회수 높은 예능 쇼츠를 넣으면 → 비슷한 템포·편집감의 장면을 우선 선정",
-                    "[불러오기] 클릭 → 오디오 분석 완료 후 초록색 체크로 표시됩니다",
+                    "[불러오기] 클릭 → 64K 고품질 오디오 다운로드 후 초록색 체크로 표시됩니다",
                     "5분 이하 YouTube / YouTube Shorts URL만 지원합니다",
                     "참고 쇼츠는 AI 분석 시 보조 자료로만 활용되며, 실제 영상은 저장되지 않습니다",
                     "✕ 제거 버튼으로 참고 쇼츠를 해제할 수 있습니다",
@@ -1003,7 +1188,7 @@ export default function Page() {
                     "출력 포맷: 가로(원본 비율) / 1:1 정사각형 / 세로 9:16 (Shorts/Reels용 · 블러 배경 자동 적용)",
                     "썸네일: 추출 시 각 클립 시작 지점 JPG가 ZIP에 자동 포함",
                     "🎵 오디오 모드(기본): 빠르고 안정적, 용량 제한 없음",
-                    "🎬 영상+오디오 모드: 표정·자막 등 시각 정보까지 분석, API 비용 약 3배, 60분 이하만 지원 · 클립 추출은 항상 원본 화질",
+                    "🎬 영상+오디오 모드: 표정·자막 등 시각 정보까지 분석, API 비용 약 3배, 60분 이하만 지원 · 클립 추출은 항상 원본 화질 · 파일 업로드 안정성 개선",
                     "🔄 재분석: 결과가 마음에 안 들면 클릭 → 이전 장면을 제외한 새 장면 탐색",
                   ]
                 },
@@ -1050,10 +1235,28 @@ export default function Page() {
                 </ul>
               </div>
 
-              {/* 기록·기타 */}
+              {/* 자막 생성 탭 */}
               <div>
                 <h3 className="font-bold text-slate-800 mb-2 flex items-center gap-2">
                   <span className="w-6 h-6 rounded-full bg-slate-800 text-white text-xs font-bold flex items-center justify-center shrink-0">10</span>
+                  자막 생성 탭
+                </h3>
+                <ul className="space-y-1.5 text-xs text-slate-600 pl-8">
+                  <li>• 대사 없이 BGM만 있는 쇼츠 영상에서 창작 한국어 자막을 AI가 자동 생성</li>
+                  <li>• 클립 추출 탭과 완전히 별개 — 어떤 로컬 영상이든 자막 파일만 만들 때 사용</li>
+                  <li><span className="font-medium text-slate-700">자막 밀도</span> — 촘촘(1~2초 간격) / 보통(3~4초) / 핵심만(5~8초, 임팩트 순간만)</li>
+                  <li><span className="font-medium text-slate-700">자막 분위기</span> — 감성적·유머러스·긴장감·따뜻한 등 복수 선택 가능 (미선택 시 AI 자체 판단)</li>
+                  <li><span className="font-medium text-slate-700">자막.srt</span> — 일반 창작 자막. 캡컷 › 텍스트 › 자막 파일 가져오기로 import</li>
+                  <li><span className="font-medium text-red-500">포인트자막.srt</span> — 단어 강조(<span className="text-red-500">빨간색</span>) + 핵심 문장(<span className="font-medium" style={{ color: "#b8860b" }}>금색</span>) HTML 태그 포함. 캡컷 import 후 폰트·크기·위치 직접 조정</li>
+                  <li className="text-slate-400 pt-0.5 border-t border-slate-100 mt-1">※ 소요 시간: 30초~3분 (영상 길이에 따라 다름)</li>
+                  <li className="text-slate-400">※ 클립 추출 탭의 영상과 별도로 파일을 다시 선택해야 합니다</li>
+                </ul>
+              </div>
+
+              {/* 기록·기타 */}
+              <div>
+                <h3 className="font-bold text-slate-800 mb-2 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-slate-800 text-white text-xs font-bold flex items-center justify-center shrink-0">11</span>
                   기타 기능
                 </h3>
                 <ul className="space-y-1.5 text-xs text-slate-600 pl-8">
@@ -1104,6 +1307,7 @@ export default function Page() {
                 <p>• 포인트 자막은 추출 전에 생성해야 ZIP에 자동 포함됩니다</p>
                 <p>• 분석 완료 시 브라우저 알림이 옵니다 (알림 허용 필요)</p>
                 <p>• 분석 중 취소가 필요하면 진행률 표시 옆 [취소] 버튼을 누르세요</p>
+                <p>• 긴 영상이나 대용량 파일도 안정적으로 처리됩니다 — '대기 중' 메시지가 나타나도 정상 동작입니다</p>
               </div>
 
             </div>
@@ -1165,7 +1369,7 @@ export default function Page() {
       )}
 
       <footer className="border-t border-slate-100 py-6 text-center mt-8 space-y-1">
-        <p className="text-xs text-slate-400">Clip Extractor v0.606.21 — 로컬 전용 도구</p>
+        <p className="text-xs text-slate-400">Clip Extractor v260621.0937 — 로컬 전용 도구</p>
         <p className="text-xs text-slate-400">Created by CONTENT FACTORY</p>
       </footer>
 

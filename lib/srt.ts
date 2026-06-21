@@ -24,3 +24,10 @@ export function makeSrt(subtitles: { time: string; text: string }[], displayMs =
     })
     .join("\n\n") + "\n";
 }
+
+export function makeTimedSrt(entries: { start: string; end: string; text: string }[]): string {
+  if (entries.length === 0) return "";
+  return entries
+    .map((e, i) => `${i + 1}\n${e.start} --> ${e.end}\n${e.text}`)
+    .join("\n\n") + "\n";
+}

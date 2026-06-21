@@ -75,7 +75,7 @@ export function extractAudio(ffmpeg: string, inputPath: string, outputPath: stri
     "-i", inputPath,
     "-vn", "-ar", "22050", "-ac", "1", "-b:a", "32k",
     "-y", outputPath,
-  ]);
+  ], 600000); // 10분 — 2시간 영상도 충분
 }
 
 export function extractAudioSegment(ffmpeg: string, inputPath: string, startSec: number, durationSec: number, outputPath: string): Promise<void> {
@@ -92,6 +92,7 @@ export function extractAudioSegment(ffmpeg: string, inputPath: string, startSec:
 export function extractClip(ffmpeg: string, inputPath: string, startSec: number, durationSec: number, outputPath: string): Promise<void> {
   // double-ss: 5초 앞에서 입력 시킹 → 출력 시킹으로 정확한 첫 프레임 보장
   const preSec = Math.min(5, startSec);
+  const timeoutMs = Math.max(300000, durationSec * 2000 + 60000);
   return spawnAsync(ffmpeg, [
     "-loglevel", "error",
     "-ss", String(startSec - preSec),
@@ -101,7 +102,7 @@ export function extractClip(ffmpeg: string, inputPath: string, startSec: number,
     "-c:v", "libx264", "-c:a", "aac",
     "-movflags", "+faststart",
     "-y", outputPath,
-  ], 300000);
+  ], timeoutMs);
 }
 
 // 세로 변환 (9:16): 블러 배경에 원본 오버레이
@@ -113,6 +114,7 @@ export function extractClipVertical(ffmpeg: string, inputPath: string, startSec:
     "[bg][fg]overlay=(W-w)/2:(H-h)/2[out]",
   ].join(";");
   const preSec = Math.min(5, startSec);
+  const timeoutMs = Math.max(300000, durationSec * 2000 + 60000);
   return spawnAsync(ffmpeg, [
     "-loglevel", "error",
     "-ss", String(startSec - preSec),
@@ -125,7 +127,7 @@ export function extractClipVertical(ffmpeg: string, inputPath: string, startSec:
     "-c:v", "libx264", "-c:a", "aac",
     "-movflags", "+faststart",
     "-y", outputPath,
-  ], 300000);
+  ], timeoutMs);
 }
 
 // 1:1 정사각형 (1080×1080): 블러 배경에 원본 오버레이
@@ -137,6 +139,7 @@ export function extractClipSquare(ffmpeg: string, inputPath: string, startSec: n
     "[bg][fg]overlay=(W-w)/2:(H-h)/2[out]",
   ].join(";");
   const preSec = Math.min(5, startSec);
+  const timeoutMs = Math.max(300000, durationSec * 2000 + 60000);
   return spawnAsync(ffmpeg, [
     "-loglevel", "error",
     "-ss", String(startSec - preSec),
@@ -149,7 +152,7 @@ export function extractClipSquare(ffmpeg: string, inputPath: string, startSec: n
     "-c:v", "libx264", "-c:a", "aac",
     "-movflags", "+faststart",
     "-y", outputPath,
-  ], 300000);
+  ], timeoutMs);
 }
 
 export function extractThumbnail(ffmpeg: string, inputPath: string, seekSec: number, outputPath: string): Promise<void> {
